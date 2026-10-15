@@ -1,0 +1,179 @@
+// First-use regression checks run only in a disposable extension profile.
+import assert from 'node:assert/strict';
+import {mkdtemp, mkdir, rm, cp, readFile, writeFile} from 'node:fs/promises';
+import {createServer} from 'node:http';
+import {tmpdir} from 'node:os';
+import {resolve, dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+const {chromium} = await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const output = resolve(root, '.cache/qa/getting-started');
+await mkdir(output, {recursive:true});
+const profile = await mkdtemp(resolve(tmpdir(), 'otherwise-guide-'));
+const fixture = await mkdtemp(resolve(tmpdir(), 'otherwise-guide-extension-'));
+const extension = resolve(fixture, 'extension');
+await cp(resolve(root, 'dist/otherwise-extension'), extension, {recursive:true});
+const manifestPath = resolve(extension, 'manifest.json');
+const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+manifest.host_permissions = [...(manifest.host_permissions || []), 'http://127.0.0.1/*'];
+manifest.optional_host_permissions = (manifest.optional_host_permissions || []).filter(pattern => pattern !== 'http://127.0.0.1/*');
+await writeFile(manifestPath, JSON.stringify(manifest));
+const requests = [];
+let responseMode = 'failure';
+const server = createServer(async (request, response) => {
+  let body = ''; for await (const chunk of request) body += chunk;
+  requests.push({path:request.url, body:JSON.parse(body || '{}')});
+  response.setHeader('Content-Type', 'application/json');
+  response.statusCode = responseMode === 'failure' ? 503 : 200;
+  response.end(JSON.stringify({recommendations:responseMode === 'empty' ? [] : [
+    {topic:'Botany', domain:'Nature', description:'The study of plants.', nearest_interest:'Photography', zone:'New territory'},
+    {topic:'Landscape architecture', domain:'Design', description:'Designing outdoor spaces.', nearest_interest:'Photography', zone:'New territory'},
+  ]}));
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const endpoint = `http://127.0.0.1:${server.address().port}`;
+const errors = [], checks = [];
+let context;
+try {
+  context = await chromium.launchPersistentContext(profile, {
+    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),
+    headless:true, ignoreDefaultArgs:['--disable-extensions'], viewport:{width:390,height:850},
+    args:[`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+  });
+  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  await context.route('https://www.google.com/**', route => route.fulfill({body:'Isolated search fixture.'}));
+  const base = worker.url().replace('background.js', 'sidepanel.html');
+  const page = await context.newPage();
+  page.on('pageerror', error => errors.push(error.message));
+  const setLanguage = async (target, language) => {
+    await target.locator('[data-focus="nav-settings"]').click();
+    await target.locator('#settings-language').selectOption(language);
+    await target.waitForFunction(value => document.documentElement.lang === value, language);
+    await target.locator('[data-guide-action="resume"]').click();
+  };
+  const screenshot = async (target, name) => {
+    const width = target.viewportSize().width;
+    assert.equal(await target.evaluate(() => document.documentElement.scrollWidth), width, 'The guide must not introduce horizontal scrolling');
+    const bounds = await target.evaluate(() => {
+      const main = document.querySelector('#main-view').getBoundingClientRect();
+      const guide = document.querySelector('#welcome-guide').getBoundingClientRect();
+      return {mainTop:main.top, mainRight:main.right, guideBottom:guide.bottom, guideLeft:guide.left};
+    });
+    assert.ok(width > 1050 ? bounds.guideLeft >= bounds.mainRight : bounds.mainTop >= bounds.guideBottom, 'The guide does not cover page controls');
+    assert.equal(await target.locator(':modal').count(), 0);
+    await target.screenshot({path:resolve(output, name), fullPage:true});
+  };
+  await page.goto(base);
+  await page.locator('#welcome-guide').waitFor();
+  assert.equal(await page.locator('#manual-interest').isVisible(), true, 'Fresh profiles start with the first task on Interests');
+  assert.match(await page.locator('.guide-progress').innerText(), /Step 1 of 3/i);
+  const addLabel = await page.locator('#manual-form button').innerText();
+  assert.ok((await page.locator('#guide-body').innerText()).includes(`press ${addLabel}.`), 'The guide names the button actually shown on the page');
+  checks.push('Fresh profiles start at step 1 on Interests');
+  await screenshot(page, '390-guide-save-en.png');
+  await setLanguage(page, 'zh-CN');
+  await page.setViewportSize({width:320,height:850});
+  await screenshot(page, '320-guide-save-zh.png');
+  const dashboard = await context.newPage();
+  dashboard.on('pageerror', error => errors.push(error.message));
+  await dashboard.setViewportSize({width:1440,height:1000});
+  await dashboard.goto(base.replace('sidepanel.html','dashboard.html'));
+  await dashboard.locator('#welcome-guide').waitFor();
+  assert.equal(await dashboard.locator('#manual-interest').isVisible(), true);
+  await screenshot(dashboard, '1440-dashboard-guide-save-zh.png');
+  await dashboard.close();
+  await page.setViewportSize({width:390,height:850});
+  await setLanguage(page, 'en');
+  assert.equal(await page.locator('[data-guide-example="Photography"]').count(), 1, 'An example prepares the actual interest input');
+  await page.locator('[data-guide-example="Photography"]').click();
+  assert.equal(await page.locator('#manual-interest').inputValue(), 'Photography');
+  assert.equal(await page.locator('.saved-interest-row').count(), 0, 'An example does not save until the user confirms');
+  await page.locator('#manual-form button').click();
+  assert.equal(await page.locator('.saved-interest-row').count(), 0, 'Matching a title still requires confirming its meaning');
+  await page.locator('[data-action="choose-interest"][data-id="catalog:Photography"]').click();
+  await page.locator('.guide-success').waitFor();
+  await page.reload();
+  await page.locator('#welcome-guide').waitFor();
+  assert.match(await page.locator('.guide-progress').innerText(), /Step 2 of 3/i);
+  assert.equal(await page.locator('#recommendations-title').isVisible(), true);
+  checks.push('Examples prepare the input; saving and reloading resumes at the actual next task');
+  assert.equal(await page.locator('[data-guide-action="connection"]').count(), 1, 'Connection recovery has an actionable settings entry');
+  await page.locator('[data-guide-action="connection"]').click();
+  await page.locator('#endpoint').fill(endpoint);
+  await page.locator('#settings-form button[type="submit"]').click();
+  await page.locator('[data-guide-action="resume"]').click();
+  assert.match(await page.locator('.guide-progress').innerText(), /Step 2 of 3/i);
+  assert.equal(requests.length, 0, 'Opening and resuming the guide sends no request');
+  await page.locator('[data-guide-action="request"]').click();
+  await page.locator('.guide-recovery').waitFor();
+  assert.match(await page.locator('.guide-recovery').innerText(), /warming up/);
+  await screenshot(page, '390-guide-service-error-en.png');
+  responseMode = 'empty';
+  await page.locator('[data-guide-action="request"]').click();
+  await page.locator('.guide-empty').waitFor();
+  assert.equal(await page.locator('[data-guide-action="next"]').count(), 0, 'An empty response does not count as finishing recommendations');
+  responseMode = 'ideas';
+  await page.locator('[data-guide-action="request"]').click();
+  await page.locator('.guide-success').waitFor();
+  await screenshot(page, '390-guide-ideas-en.png');
+  await page.locator('[data-guide-action="next"]').click();
+  assert.match(await page.locator('.guide-progress').innerText(), /Step 3 of 3/i);
+  await setLanguage(page, 'zh-CN');
+  await screenshot(page, '390-guide-search-zh.png');
+  await setLanguage(page, 'en');
+  const opened = context.waitForEvent('page');
+  await page.locator('[data-guide-action="search"][data-provider="google"]').click();
+  const search = await opened;
+  await search.waitForURL('https://www.google.com/search?q=Botany');
+  await search.close();
+  await page.locator('[data-guide-action="finish"]').waitFor();
+  assert.match(await page.locator('#guide-heading').innerText(), /Your first exploration is ready/);
+  assert.equal(await page.locator('#guide-heading').evaluate(node => document.activeElement === node), true, 'Successful guide search moves keyboard focus to completion feedback');
+  assert.equal(await page.locator('[data-guide-action="map"]').count(), 1);
+  await page.screenshot({path:resolve(output, '390-guide-complete-en.png')});
+  await page.reload();
+  await page.locator('[data-guide-action="finish"]').waitFor();
+  await page.locator('[data-guide-action="finish"]').click();
+  await page.locator('#welcome-guide').waitFor({state:'detached'});
+  await page.reload();
+  await page.locator('#recommendations-title').waitFor();
+  assert.equal(await page.locator('#welcome-guide').count(), 0);
+  assert.equal(requests.length, 3);
+  checks.push('Connection recovery, empty results, successful recommendations, explicit search, completion and dismissal persistence');
+  await page.locator('[data-focus="nav-settings"]').click();
+  const guideSettings = page.locator('[data-disclosure="settings-guide"]');
+  await guideSettings.locator(':scope > summary').click();
+  await page.locator('[data-action="open-guide"]').focus();
+  await page.keyboard.press('Enter');
+  await page.locator('#welcome-guide[data-guide-step="0"]').waitFor();
+  assert.equal(await page.locator('#guide-heading').evaluate(node => document.activeElement === node), true);
+  await setLanguage(page, 'zh-CN');
+  assert.match(await page.locator('#guide-heading').innerText(), /保存第一个兴趣/);
+  await page.locator('[data-guide-action="skip"]').click();
+  await page.locator('#welcome-guide').waitFor({state:'detached'});
+  await page.reload();
+  await page.locator('#main-view').waitFor();
+  assert.equal(await page.locator('#welcome-guide').count(), 0);
+  assert.equal(await page.evaluate(() => chrome.permissions.contains({permissions:['history']})), false);
+  await page.locator('[data-focus="nav-settings"]').click();
+  const dataSettings = page.locator('[data-disclosure="settings-data"]');
+  await dataSettings.locator(':scope > summary').click();
+  await page.locator('[data-action="reset"]').click();
+  await page.locator('[data-choice="confirm"]').click();
+  await page.locator('#welcome-guide[data-guide-step="0"]').waitFor();
+  assert.equal(await page.locator('.saved-interest-row').count(), 0);
+  assert.equal(requests.length, 3, 'Replay, language changes, Skip and Reset send no recommendation request');
+  for (const request of requests) {
+    assert.deepEqual(request.body.keywords, ['Photography']);
+    assert.equal(Object.hasOwn(request.body, 'tutorialActive'), false);
+  }
+  checks.push('Bilingual side panel/Dashboard layouts, keyboard replay, Skip, Reset and zero passive recommendation/history access');
+  assert.deepEqual(errors, []);
+  await writeFile(resolve(output, 'results.json'), JSON.stringify({passed:true, checks}, null, 2));
+  console.log(JSON.stringify({passed:true, checks, output}, null, 2));
+} finally {
+  await context?.close();
+  await rm(profile, {recursive:true, force:true});
+  await rm(fixture, {recursive:true, force:true});
+  await new Promise(resolve => server.close(resolve));
+}

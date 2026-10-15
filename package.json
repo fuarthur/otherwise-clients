@@ -1,0 +1,21 @@
+{
+  "name": "otherwise-clients",
+  "version": "0.1.14",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "engines": {"node": ">=22"},
+  "scripts": {
+    "test": "node --test extension/tests/*.test.js && python3 -m unittest discover -s tests -v",
+    "audit:public": "python3 scripts/public_boundary.py",
+    "build": "python3 scripts/build_extension.py",
+    "test:ui": "node scripts/test_ui_browser.mjs",
+    "test:guide": "node scripts/test_getting_started_browser.mjs",
+    "test:themes": "node scripts/test_theme_browser.mjs",
+    "test:galaxy": "node scripts/test_galaxy_browser.mjs",
+    "test:focus": "node scripts/test_focus_view_browser.mjs",
+    "test:backup": "node scripts/test_backup_browser.mjs",
+    "test:usability": "node scripts/test_usability_browser.mjs",
+    "test:exploration-review": "node scripts/test_exploration_review_browser.mjs"
+  }
+}

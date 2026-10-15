@@ -1,0 +1,44 @@
+/* Theme palettes. Component styles consume roles rather than theme IDs. */
+:root {
+  color-scheme: dark;
+  --night: #111a22; --ivory: #edf0e9; --ink: #e3e8e6; --muted: #a5b1b8;
+  --silver: #bcc7cc; --sage: #c6d6c4; --line: #2c3a43; --control: #526775;
+  --hover: #21313c; --rose: #e6b9b0; --surface: #18232c;
+  --accent: var(--sage); --accent-ink: #101c21; --selected: #203436; --field: #111b24;
+  --error-bg: #2a222a; --error-ink: #edd5d2; --error-line: #665253;
+  --body-glow: #1a2731; --dashboard-glow: #192838; --dashboard-mid: #0d1724; --dashboard-edge: #0a1320;
+  --notice-bg: #172934; --detail-ink: #c5cdd1; --dialog-backdrop: #040b14c4;
+  --warning-line: #8e7755; --warning-bg: #28241e;
+  --map-night: #101a29; --map-surface: #182534; --map-ivory: #f0ecdf; --map-ink: #dce1e3;
+  --map-muted: #a0acb8; --map-silver: #bac6cc; --map-sage: #bccfc5; --map-line: #334252;
+  --map-control: #607788; --map-hover: #253444; --map-field: #0c1522; --map-rose: #e4b6b0;
+  --map-results: #14212f; --map-selected: #233b43; --map-detail: #15223199; --map-detail-overlay: #152231f5;
+  --map-editor: #122132; --map-eyebrow: #b3c9c2; --map-tag: #c5d8cf; --map-tag-line: #435c5d;
+  --legend-focus: #d7c99a; --legend-recommended: #c3b1dd; --legend-neighbor: #a5bee8;
+  --focus-line: #283345; --focus-muted: #99a8bd; --focus-ink: #edf1f7;
+  --focus-button: #192232; --focus-hover: #243349; --focus-control: #68819f; --focus-ring: #b4cff4;
+  --focus-accent: #d4e4fb; --focus-accent-ink: #0e1d31; --focus-field: #101925;
+  --focus-results: #111c2c; --focus-detail: #111b29; --focus-detail-ink: #c8d3e3;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --night: #f5f6f2; --ivory: #1c3034; --ink: #263b40; --muted: #53686e;
+  --silver: #52696f; --sage: #32675a; --line: #d8e0db; --control: #91a5a1;
+  --hover: #e7ede7; --rose: #a04743; --surface: #ffffff;
+  --accent: var(--sage); --accent-ink: #ffffff; --selected: #e1ece3; --field: #fafbf8;
+  --error-bg: #fff0ed; --error-ink: #873c39; --error-line: #c69289;
+  --body-glow: #e8eee4; --dashboard-glow: #e8eee4; --dashboard-mid: #f5f6f2; --dashboard-edge: #f5f6f2;
+  --notice-bg: #e9f0e8; --detail-ink: #3f555b; --dialog-backdrop: #152d3b66;
+  --warning-line: #b39450; --warning-bg: #fff8e6;
+  --map-night: #eef2ec; --map-surface: var(--surface); --map-ivory: var(--ivory); --map-ink: var(--ink);
+  --map-muted: var(--muted); --map-silver: var(--silver); --map-sage: var(--sage); --map-line: var(--line);
+  --map-control: var(--control); --map-hover: var(--hover); --map-field: var(--field); --map-rose: var(--rose);
+  --map-results: var(--surface); --map-selected: var(--selected); --map-detail: var(--surface); --map-detail-overlay: var(--surface);
+  --map-editor: var(--surface); --map-eyebrow: var(--sage); --map-tag: var(--sage); --map-tag-line: var(--control);
+  --legend-focus: #82651c; --legend-recommended: #795598; --legend-neighbor: #4b6a9a;
+  --focus-line: var(--line); --focus-muted: var(--muted); --focus-ink: var(--ink);
+  --focus-button: var(--surface); --focus-hover: var(--hover); --focus-control: var(--control); --focus-ring: var(--sage);
+  --focus-accent: var(--sage); --focus-accent-ink: var(--accent-ink); --focus-field: var(--field);
+  --focus-results: var(--surface); --focus-detail: var(--surface); --focus-detail-ink: var(--detail-ink);
+}

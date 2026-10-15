@@ -1,0 +1,19 @@
+/* The selection marker lives behind real controls and never captures input. */
+.main-nav, .dashboard .main-nav { isolation: isolate; }
+.main-nav-indicator { position: absolute; border-radius: 9px; background: var(--selected); box-shadow: inset 2px 0 var(--sage); transform-origin: 0 0; pointer-events: none; }
+.main-nav button, .dashboard .main-nav button { position: relative; z-index: 1; }
+.main-nav:has(.main-nav-indicator) button[aria-current='page'], .dashboard .main-nav:has(.main-nav-indicator) button[aria-current='page'] { background: transparent; box-shadow: none; }
+.refresh-button[aria-busy='true'] > .ui-icon { animation: ui-request-spin 900ms linear 160ms infinite; }
+@keyframes ui-request-spin { to { transform: rotate(360deg); } }
+dialog.ui-dialog-motion::backdrop { animation: ui-backdrop-entry 180ms ease-out; }
+@keyframes ui-backdrop-entry { from { opacity: 0; } to { opacity: 1; } }
+:root[data-ui-motion-paused='true'] .refresh-button > .ui-icon { animation: none; }
+:root[data-ui-motion-paused='true'] dialog.ui-dialog-motion::backdrop { animation: none; }
+@media (max-width: 760px) {
+  .main-nav, .dashboard .main-nav { position: relative; }
+  .main-nav-indicator { box-shadow: inset 0 -2px var(--sage); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .refresh-button[aria-busy='true'] > .ui-icon { animation: none; }
+  dialog.ui-dialog-motion::backdrop { animation: none; }
+}
