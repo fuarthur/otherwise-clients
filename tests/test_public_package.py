@@ -77,6 +77,10 @@ class PublicPackageTests(unittest.TestCase):
                 self.assertIn('otherwise-extension/LICENSE', names)
                 self.assertIn('otherwise-extension/THIRD_PARTY_NOTICES.md', names)
                 self.assertIn('otherwise-extension/galaxy-layout.json', names)
+                self.assertIn('otherwise-extension/subject-domains.json', names)
+                fields = json.loads(package.read('otherwise-extension/subject-domains.json'))
+                catalog = json.loads(package.read('otherwise-extension/catalog.json'))
+                self.assertEqual(fields, sorted({row['domain'] for row in catalog}))
                 self.assertFalse(any('/tests/' in name or name.endswith(('.py', '.ipynb', '.npy')) for name in names))
                 self.assertEqual(len(names), len(set(names)))
 

@@ -1,5 +1,6 @@
 """Package public client sources; no backend, model or external dependencies."""
 from pathlib import Path
+import json
 import shutil
 import zipfile
 from public_boundary import ROOT, ASSETS, validate_assets, validate_tree, validate_path, require
@@ -25,6 +26,8 @@ def build(root=ROOT, output=None):
             shutil.copyfile(path, target)
     for name in ASSETS:
         shutil.copyfile(root / 'client-assets' / name, destination / name)
+    (destination / 'subject-domains.json').write_text(json.dumps(
+        sorted({row['domain'] for row in catalog}), ensure_ascii=False, separators=(',', ':')))
     for name in ['LICENSE', 'THIRD_PARTY_NOTICES.md']:
         shutil.copyfile(root / name, destination / name)
     archive = output / 'OtherWise-extension.zip'
