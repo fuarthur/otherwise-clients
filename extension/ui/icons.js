@@ -9,6 +9,7 @@ const paths = {
   arrow: '<path d="M4 12h16m-6-6 6 6-6 6"/>',
   chevron: '<path d="m9 5 7 7-7 7"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  plus: '<path d="M12 4v16M4 12h16"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
   shield: '<path d="m12 3 8 4v5c0 5-8 9-8 9s-8-4-8-9V7Z"/><path d="m8 12 3 3 5-6"/>',
   grid: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
@@ -18,6 +19,7 @@ const paths = {
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/>',
   eyeOff: '<path d="m3 3 18 18M10 5h2c5 0 9 7 9 7a18 18 0 0 1-3 4M6 6a22 22 0 0 0-3 6s4 7 9 7a12 12 0 0 0 4-1M10 10a3 3 0 0 0 4 4"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4m0 3h.01"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8.5h.01"/>',
 };
 
 export function icon(name) {

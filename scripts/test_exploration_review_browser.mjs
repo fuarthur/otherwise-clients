@@ -5,7 +5,7 @@ import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output=resolve(root,'.cache/qa/exploration-review');await mkdir(output,{recursive:true});
 const temp=await mkdtemp(resolve(tmpdir(),'otherwise-exploration-review-'));
@@ -22,16 +22,10 @@ const server=createServer(async(request,response)=>{
   response.end(JSON.stringify({recommendations:topics}));
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-let context;
+let context,base,close;
 try {
-  context=await chromium.launchPersistentContext(resolve(temp,'profile'),{
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),headless:true,
-    ignoreDefaultArgs:['--disable-extensions'],viewport:{width:390,height:850},
-    args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],
-  });
+  ({context, base, close}=await launchExtension({extension,profile:resolve(temp,'profile'),viewport:{width:390,height:850}}));
   await context.route(/https:\/\/www\.(google|youtube)\.com\//,route=>route.fulfill({contentType:'text/html',body:'<h1>Fictional external search</h1>'}));
-  const worker=context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
-  const base=worker.url().replace('background.js','');
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   page.setDefaultTimeout(8000);
   const action=(target,action)=>target.evaluate(action=>chrome.runtime.sendMessage({type:'ACTION',action}),action);
@@ -137,5 +131,5 @@ try {
   await writeFile(resolve(output,'result.json'),JSON.stringify({checks,errors,requests:requests.length},null,2));
   console.log(JSON.stringify({checks,errors,requests:requests.length},null,2));
 } finally {
-  await context?.close();await new Promise(resolve=>server.close(resolve));await rm(temp,{recursive:true,force:true});
+  await close?.();await new Promise(resolve=>server.close(resolve));await rm(temp,{recursive:true,force:true});
 }

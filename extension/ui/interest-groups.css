@@ -2,7 +2,7 @@
 .interest-group-toolbar { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .interest-group-toolbar .interest-group-browse { flex: 1; margin: 0; min-width: 0; }
 .interest-group-toolbar select { min-height: 40px; padding-block: 8px; font-size: 12px; }
-.interest-group-toolbar .interest-group-create { flex: 0 0 40px; min-height: 40px; padding: 4px; font-size: 23px; font-weight: 400; }
+.interest-group-toolbar .interest-group-create { flex: 0 0 40px; height: 40px; min-height: 40px; padding: 0; }
 .interest-group-tools { position: relative; flex: 0 0 auto; }
 .interest-group-tools > summary { display: flex; align-items: center; justify-content: center; width: 40px; min-height: 40px; border: 1px solid var(--control); border-radius: 8px; cursor: pointer; list-style: none; }
 .interest-group-tools > summary::-webkit-details-marker { display: none; }

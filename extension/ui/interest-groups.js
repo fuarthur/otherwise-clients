@@ -1,5 +1,7 @@
 import {openDialog, closeDialog} from './dialog-motion.js';
 import {icon} from './icons.js';
+import {escapeHtml as escape} from './html.js';
+import {paginate} from './pagination.js';
 
 const copy = {
   title:['Interest groups','兴趣分组'],
@@ -49,7 +51,6 @@ const copy = {
   invalidSuggestions:['The service returned incomplete grouping suggestions. Please retry.','服务返回的分组建议不完整，请重试。'],
 };
 
-const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const normalize = value => String(value ?? '').normalize('NFKC').trim().toLowerCase();
 const validName = value => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 80 && !/[\x00-\x1f\x7f]/.test(value);
 const rowId = row => row?.id || row?.topic;
@@ -60,10 +61,8 @@ const memberCount = (group, saved) => [...new Set(idsOf(group))].reduce((count,i
 const groupSignature = group => group && JSON.stringify([group.name,[...new Set(idsOf(group))].sort(),group.source || 'manual']);
 const selectedScope = state => state?.recommendationGroupIds == null ? null : state.recommendationGroupIds;
 const pageOf = (rows, page, size = 12) => {
-  const total = rows.length, pages = Math.max(1,Math.ceil(total / size));
-  page = Math.max(1,Math.min(pages,page));
-  const offset = (page - 1) * size;
-  return {items:rows.slice(offset,offset + size),total,page,pages,start:total ? offset + 1 : 0,end:Math.min(total,offset + size)};
+  const {pageCount:pages,...result}=paginate(rows,page,size);
+  return {...result,pages};
 };
 const scopeMembers = (state, ids) => {
   const approved = approvedRows(state);
@@ -99,7 +98,7 @@ export function createInterestGroupsUI({getState,getLanguage = () => 'en',onFilt
     const count = selected ? memberCount(selected,saved) : 0;
     return `<section class="interest-groups" aria-labelledby="interest-groups-title">
       <div class="interest-group-toolbar"><label class="interest-group-browse"><span class="sr-only" id="interest-groups-title">${t('title')} · ${t('browse')}</span><select data-group-filter data-group-focus="group-filter" data-focus="group-filter">${options.map(([id,name,total]) => `<option value="${escape(id)}"${id === activeGroup ? ' selected' : ''}>${escape(name)} · ${total}</option>`).join('')}</select></label>
-      ${button('create','+',` class="interest-group-create" aria-label="${t('create')}" title="${t('create')}"`)}
+      ${button('create',icon('plus'),` class="interest-group-create" aria-label="${t('create')}" title="${t('create')}"`)}
       <details class="interest-group-tools" data-action-popover><summary data-focus="group-tools" aria-label="${t('manage')}" title="${t('manage')}">${icon('more')}</summary><div class="action-popover-panel" role="group" aria-label="${t('manage')}"><p class="popover-label">${t('title')}</p>${button('suggest',t('suggest'),approved.length ? '' : ' disabled')}${selected ? `${button('edit',t('edit'),` data-group-id="${escape(selected.id)}"`)}${button('recommend',t('recommend'),` data-group-id="${escape(selected.id)}"${count ? '' : ' disabled'}`)}` : ''}<p class="interest-group-help muted small">${t('help')}${groups.length ? '' : ` ${t('noGroups')}`}</p></div></details></div>
       ${selected && !count ? `<p class="interest-group-empty muted small">${t('emptyGroup')}</p>` : ''}
       <p class="interest-groups-status small" role="status" hidden></p>

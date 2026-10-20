@@ -6,6 +6,11 @@ import {createMapFullscreen} from './map-fullscreen.js';
 import {createGalaxyLayoutSession, createGalaxyLayoutEditor} from './galaxy-layout-editor.js';
 import {galaxyLabelCandidates, placeGalaxyLabels} from './galaxy-labels.js';
 import {openDialog, closeDialog} from './dialog-motion.js';
+import {createGalaxyTour} from './galaxy-tour-session.js';
+import {createGalaxyTourControls} from './galaxy-tour-controls.js';
+import {tourInterestScope} from './galaxy-tour-scope.js';
+import {createGalaxyTourMusic} from './galaxy-tour-music.js';
+import {normalizeTourMusic,validTourMusic,normalizeTourMusicVolume,validTourMusicVolume,normalizeTourMusicMode,validTourMusicMode} from '../core/galaxy-tour-music.js';
 
 const COLORS = ['#8cafec', '#89ccb0', '#efae98', '#c7a4ee', '#d6cd8d', '#a2c7d9', '#da9fbb', '#93b9a0', '#ddbc91', '#a5a5d9', '#72c7c7', '#d1a587', '#c4beae', '#9daed0', '#c8abc8', '#7fc39c', '#a1c0f0', '#d5b073', '#a9ba85', '#d1a2a2', '#85bed5', '#bfa9df', '#bdbd93'];
 const array = value => Array.isArray(value) ? value : [];
@@ -24,7 +29,7 @@ function button(text, action, topic, className) {
 }
 
 /** A local-only view. All product mutations occur through explicit callbacks. */
-export function createGalaxyMap({container, catalog, layout, state = {}, language = 'en', onSave, onFocus, onEnterFocus, onSearch, viewState, requestGalaxyLayout, pollGalaxyLayout, onGalaxySettings}) {
+export function createGalaxyMap({container, catalog, layout, state = {}, language = 'en', onSave, onFocus, onEnterFocus, onSearch, onOpenInterests, viewState, requestGalaxyLayout, pollGalaxyLayout, onGalaxySettings}) {
   let data = prepareGalaxy(catalog, layout);
   let fitted = viewState?.fitted === true;
   const customTopics = () => array(state.approved).filter(topic => !data.byId.has(topic.id));
@@ -33,6 +38,15 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
   let destroyed = false, frame = 0, viewport = {width: 0, height: 0}, hits = [], hovered = null;
   let saved = new Set(), baseline = new Set(), recommended = new Set(), explored = new Set();
   let actionError = false, active = true, lit = new Set(), waves = [], candidateIds = [], releaseIds = [];
+  let tour=null,tourControls=null,tourFrame=null,tourSnapshot=null,tourOrigin=null;
+  let tourScope=null;
+  const tourScopeSelections={group:[],category:[]};
+  let pausedViewChanged=false,rejoining=false,rejoinHandle=0,tourExclusions=[],tourExclusionKey='';
+  let musicTrack=normalizeTourMusic(state.settings?.galaxyTourMusic),musicVolume=normalizeTourMusicVolume(state.settings?.galaxyTourMusicVolume);
+  let musicMode=normalizeTourMusicMode(state.settings?.galaxyTourMusicMode);
+  let musicSelection=0,musicVolumePreview=false,musicAway=!document.hasFocus();
+  const musicPending=new Map();
+  const textWidths=new Map();
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const explorationMode = () => state.settings?.galaxyExplorationMode === true;
   const pending = new Set(), pointers = new Map(), cleanups = [];
@@ -45,6 +59,7 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
     <label class="galaxy-domain-field"><span data-galaxy-copy="domain"></span><select class="galaxy-domain" data-focus="galaxy-domain"></select></label>
   </div>
   <div class="galaxy-view-toolbar" role="toolbar" aria-label="Galaxy controls">
+    <button type="button" data-galaxy-action="tour" data-galaxy-copy="tour"></button>
     <button type="button" data-galaxy-action="fit" data-galaxy-copy="fit"></button>
     <button type="button" data-galaxy-action="fullscreen"></button>
     <button type="button" data-galaxy-action="layout" data-galaxy-copy="layoutSettings" aria-haspopup="dialog" aria-expanded="false"></button>
@@ -67,6 +82,9 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
   <div class="galaxy-announcement galaxy-sr-only" role="status" aria-live="polite"></div>`;
   container.replaceChildren(root);
   const $ = selector => root.querySelector(selector);
+  const tourMusic=createGalaxyTourMusic({isActive:()=>!destroyed&&active&&!musicAway&&!document.hidden&&document.hasFocus(),
+    onError:()=>{if(!destroyed)$('.galaxy-announcement').textContent=t('tourMusicFailed');},
+    onTrackChange:id=>{if(!destroyed){musicTrack=id;updateTourControls();}}});
   const canvas = $('.galaxy-canvas'), search = $('.galaxy-search'), domainSelect = $('.galaxy-domain');
   let focusDetailOnOptionsClose = false;
   const optionsDialog = $('.galaxy-options-dialog'), layoutDialog = $('.galaxy-layout-dialog');
@@ -76,7 +94,9 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
     target.addEventListener(event, handler, options);
     cleanups.push(() => target.removeEventListener(event, handler, options));
   };
-  const fullscreen = createMapFullscreen({surface: root, button: $('[data-galaxy-action="fullscreen"]'), text: t, onResize: resize, hasOpenDialog: () => optionsDialog.open || layoutDialog.open});
+  const fullscreen = createMapFullscreen({surface: root, button: $('[data-galaxy-action="fullscreen"]'), text: t, onResize: resize,
+    hasOpenDialog: () => optionsDialog.open || layoutDialog.open || tourControls?.element.querySelector('dialog')?.open,
+    onEscape: () => {if(!tourOrigin)return false;exitTour(true);return true;}});
   const layoutSession = createGalaxyLayoutSession({request: requestGalaxyLayout, poll: pollGalaxyLayout,
     onReady: (result, parameters) => applyGeometry(mergeGalaxyLayout(layout, result, parameters)),
     onChange: snapshot => { root.dataset.layoutStatus = snapshot.status; layoutEditor?.update(snapshot); },
@@ -90,11 +110,13 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
   });
   root.dataset.layoutStatus = 'idle'; root.dataset.layoutCacheKey = data.cacheKey;
   function applyGeometry(next) {
+    cancelRejoin();tour?.pause();pausedViewChanged=false;
     const prepared = prepareGalaxy(catalog, next); cancelInteraction(); data = prepared; fitted = true;
     view.camera = fitGalaxyCamera(data.bounds, viewport); root.dataset.layoutCacheKey = data.cacheKey;
     refreshPersonalState(); setCopy(); resize();
+    if(tour)void tour.updateEnvironment({data,viewport}).catch(tourError);
   }
-  function openLayoutEditor() { if (destroyed || !active || layoutDialog.open) return; openDialog(layoutDialog); layoutEditor.open(); $('[data-galaxy-action="layout"]').setAttribute('aria-expanded','true'); }
+  function openLayoutEditor() { if (destroyed || !active || layoutDialog.open) return; tour?.pause();openDialog(layoutDialog); layoutEditor.open(); $('[data-galaxy-action="layout"]').setAttribute('aria-expanded','true'); }
   on(layoutDialog, 'close', () => {layoutEditor.element.hidden=true;const trigger=$('[data-galaxy-action="layout"]');trigger.setAttribute('aria-expanded','false');if(active && trigger.isConnected)trigger.focus({preventScroll:true});});
   on(optionsDialog, 'close', () => {
     const trigger=$('[data-galaxy-action="view-options"]');
@@ -155,6 +177,7 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
     });
     $('.galaxy-exploration-status').textContent = t(explorationMode() ? 'explorationOn' : 'explorationOff');
     renderCandidates(); renderResults(); renderDetails(); renderCustom(); scheduleDraw();
+    tourControls?.copy();if(tourSnapshot)updateTourControls(tourSnapshot);
   }
 
   function renderResults() {
@@ -231,12 +254,13 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
   }
 
   function select(id, moveCamera = true, {preserveReleaseIdentity = false} = {}) {
+    if(tourOrigin){pauseForInteraction();root.dataset.tourInspecting='true';}
     const topic = topicFor(id); if (!topic) return;
     searchResultsOpen = false;
     activation.cancel(); if (!preserveReleaseIdentity) releaseIds = []; closeCandidates(); view.selected = id; actionError = false;
     if (data.byId.has(id)) {
       if (view.domain && topic.domain !== view.domain) { view.domain = null; domainSelect.value = ''; }
-      if (moveCamera) {fitted = false; view.camera = clampCamera({x: topic.x, y: topic.y, zoom: Math.max(2.4, view.camera.zoom)}, data.bounds);}
+      if (moveCamera) {fitted = false; view.camera = clampCamera({...view.camera,x: topic.x, y: topic.y, zoom: Math.max(2.4, view.camera.zoom)}, data.bounds);}
     }
     $('.galaxy-announcement').textContent = t('selectedAnnouncement', {topic: topic.topic});
     renderResults(); renderDetails(); renderCustom(); scheduleDraw();
@@ -245,6 +269,7 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
   function fitView() { cancelInteraction(); fitted = true; view.camera = fitGalaxyCamera(data.bounds, viewport); scheduleDraw(); }
 
   function reset() {
+    if(tourOrigin)exitTour();
     fitted = false; cancelInteraction(); view.camera = defaultCamera(data.bounds); view.domain = null; view.query = '';
     search.value = ''; domainSelect.value = ''; hovered = null; $('.galaxy-tooltip').hidden = true;
     renderResults(); scheduleDraw();
@@ -255,6 +280,7 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
     if (!active || destroyed || !topic || pending.has(action)) return;
     const callback = action === 'save' ? onSave : action === 'focus' ? onFocus : action === 'enter-focus' ? onEnterFocus : onSearch;
     if (typeof callback !== 'function' || action === 'focus' && !saved.has(id) || action === 'enter-focus' && !data.byId.has(id)) return;
+    if(tourOrigin)exitTour();
     pending.add(action); actionError = false; renderDetails();
     try {
       if (action === 'focus' || action === 'enter-focus') await callback(id);
@@ -297,17 +323,28 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
       else { const curve = Math.min(45, Math.hypot(a.x - b.x, a.y - b.y) * .18); c.quadraticCurveTo((a.x + b.x) / 2 + curve, (a.y + b.y) / 2 - curve, b.x, b.y); }
       c.stroke(); c.setLineDash([]);
     };
-    array(state.edges).forEach(edge => link(edge.from, edge.to));
+    if(!tourFrame)array(state.edges).forEach(edge => link(edge.from, edge.to));
     const selected = data.byId.get(view.selected), related = new Set(selected?.neighbors.slice(0, 10).map(neighbor => neighbor.id) || []);
-    if (selected) selected.neighbors.slice(0, 10).forEach(neighbor => link(selected.id, neighbor.id, true));
+    if (selected&&!tourFrame) selected.neighbors.slice(0, 10).forEach(neighbor => link(selected.id, neighbor.id, true));
+    if(tourFrame) {
+      const ids=tourFrame.route.nodeIds,done=tourFrame.route.completedEdges;
+      c.globalAlpha=tourFrame.opacity;c.setLineDash([]);
+      for(let i=0;i<ids.length-1;i++) {
+        const a=positions.get(ids[i]),b=positions.get(ids[i+1]);if(!a||!b)continue;
+        c.strokeStyle=i<done?'#b9d3bf68':i===done?'#dce6cc99':'#9cb3c330';
+        c.lineWidth=i===done?1.6:1;
+        c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);c.stroke();
+      }
+      c.globalAlpha=1;
+    }
     hits = [];
     for (const topic of data.topics) {
       const p = positions.get(topic.id); if (!visible(p)) continue;
       const match = !view.domain || topic.domain === view.domain;
-      const isSelected = topic.id === view.selected, isFocus = topic.id === state.focus;
-      const gray = explorationMode() && !lit.has(topic.id);
+      const isSelected = topic.id === view.selected || topic.id===tourFrame?.labels[0]?.id, isFocus = topic.id === state.focus;
+      const gray = !tourFrame && explorationMode() && !lit.has(topic.id);
       const personal = saved.has(topic.id) || recommended.has(topic.id) || explored.has(topic.id);
-      c.globalAlpha = match ? gray ? .7 : isSelected || isFocus || personal || related.has(topic.id) ? 1 : .42 : .14;
+      c.globalAlpha = (match ? gray ? .7 : isSelected || isFocus || personal || related.has(topic.id) ? 1 : .42 : .14)*(tourFrame?.opacity??1);
       const radius = isSelected ? 5.7 : isFocus ? 5 : personal ? 3.5 : related.has(topic.id) ? 3 : Math.min(1.9, .63 + view.camera.zoom * .12);
       c.fillStyle = gray ? '#79838e' : domainColors.get(topic.domain);
       if (match && !gray && (isSelected || isFocus || personal)) { c.shadowColor = c.fillStyle; c.shadowBlur = isSelected ? 15 : 9; }
@@ -323,7 +360,14 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
       hits.push({id: topic.id, x: p.x, y: p.y});
     }
     c.globalAlpha = 1;
-    if (!motion.matches && explorationMode()) {
+    if(tourFrame) {
+      const p=point(tourFrame.position);
+      const glow=c.createRadialGradient(p.x,p.y,0,p.x,p.y,25);
+      glow.addColorStop(0,'#e6f0cfaa');glow.addColorStop(1,'#e6f0cf00');
+      c.globalAlpha=tourFrame.opacity;c.fillStyle=glow;c.fillRect(p.x-25,p.y-25,50,50);
+      c.fillStyle='#eff4da';c.beginPath();c.arc(p.x,p.y,3.3,0,Math.PI*2);c.fill();c.globalAlpha=1;
+    }
+    if (!motion.matches && explorationMode()&&!tourFrame) {
       const now = performance.now(); waves = waves.filter(wave => now - wave.started < 650 && lit.has(wave.id));
       for (const wave of waves) {
         const p = positions.get(wave.id), progress = (now - wave.started) / 650;
@@ -334,24 +378,45 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
       c.globalAlpha = 1; if (waves.length) scheduleDraw();
     } else waves = [];
     const font = kind => `${kind === 'selected' ? '500' : '400'} ${kind === 'domain' ? 10 : 11}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
-    const measure = (text, kind) => {c.font = font(kind); return c.measureText(text).width;};
-    const canvasRect = canvas.getBoundingClientRect();
-    const exclusions = ['.galaxy-map-caption','.galaxy-controls','.galaxy-candidates','.galaxy-results'].map(selector => $(selector)).filter(node => !node.hidden).map(node => {const r=node.getBoundingClientRect();return {x:r.left-canvasRect.left-5,y:r.top-canvasRect.top-5,width:r.width+10,height:r.height+10};});
-    const candidates = galaxyLabelCandidates(data, view, state, saved, recommended, hovered).map(label => ({...label,...point(label)}));
+    const measure = (text, kind) => {
+      const key=font(kind)+'\0'+text;
+      if(!textWidths.has(key)){c.font=font(kind);if(textWidths.size>4096)textWidths.clear();textWidths.set(key,c.measureText(text).width);}
+      return textWidths.get(key);
+    };
+    const getExclusions=selectors=>{
+      const canvasRect=canvas.getBoundingClientRect();
+      return selectors.map(selector=>$(selector)).filter(node=>node&&!node.hidden).map(node=>{
+        const r=node.getBoundingClientRect();return {x:r.left-canvasRect.left-5,y:r.top-canvasRect.top-5,width:r.width+10,height:r.height+10};
+      }).filter(r=>r.width>10&&r.height>10);
+    };
+    let exclusions;
+    if(tourFrame) {
+      const key=tourFrame.phaseKey+':'+w+':'+h+':'+root.dataset.tourInspecting;
+      if(tourExclusionKey!==key){tourExclusionKey=key;tourExclusions=getExclusions(['.galaxy-tour-caption','.galaxy-tour-bar',...(root.dataset.tourInspecting==='true'?['.galaxy-detail']:[])]);}
+      exclusions=tourExclusions;
+    } else exclusions=getExclusions(['.galaxy-map-caption','.galaxy-controls','.galaxy-candidates','.galaxy-results']);
+    const candidates = (tourFrame?tourFrame.labels:galaxyLabelCandidates(data, view, state, saved, recommended, hovered))
+      .filter(label=>label.alpha===undefined||label.alpha>.01).map(label => ({...label,...point(label)}));
     const labels = placeGalaxyLabels(candidates,viewport,measure,exclusions,view.camera.zoom);
     for (const label of labels) {
+      c.globalAlpha=(label.alpha??1)*(tourFrame?.opacity??1);
       c.font = font(label.kind); c.lineWidth = 3; c.strokeStyle = '#0a1422b8';
       c.strokeText(label.text,label.labelX,label.labelY);
       c.fillStyle = label.kind === 'domain' ? '#abb9c5b0' : label.kind === 'selected' || label.kind === 'hovered' ? '#f0ecdf' : '#cadcd9';
       c.fillText(label.text,label.labelX,label.labelY);
     }
+    c.globalAlpha=1;
     canvas.dataset.domainLabelCount = String(labels.filter(label => label.kind === 'domain').length);
     canvas.dataset.interestLabelCount = String(labels.filter(label => label.kind === 'saved').length);
     canvas.dataset.annotationCount = String(labels.filter(label => ['selected','hovered'].includes(label.kind)).length);
+    canvas.dataset.tourLabelCount=String(tourFrame?labels.filter(label=>label.kind!=='domain').length:0);
+    if(!tourFrame) {
     $('.galaxy-count').textContent = t('count', {count: topicsInDomain(data, view.domain).length.toLocaleString(language)});
     $('.galaxy-filter-caption').textContent = view.domain || t('allDomains');
     $('.galaxy-zoom').textContent = `${Math.round(view.camera.zoom * 100)}%`;
+    }
     canvas.dataset.zoom = String(view.camera.zoom); canvas.dataset.centerX = String(view.camera.x); canvas.dataset.centerY = String(view.camera.y);
+    canvas.dataset.angle=String(view.camera.angle||0);
     root.dataset.domain = view.domain || ''; root.dataset.selectedId = view.selected || '';
   }
 
@@ -361,12 +426,15 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
     if (fitted && rect.width && rect.height) view.camera = fitGalaxyCamera(data.bounds, viewport);
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(rect.width * ratio); canvas.height = Math.round(rect.height * ratio);
+    tourExclusionKey='';
+    if(tour)void tour.updateEnvironment({viewport}).catch(tourError);
     scheduleDraw();
   }
   function localPointer(event) {
     const rect = canvas.getBoundingClientRect(); return {x: event.clientX - rect.left, y: event.clientY - rect.top};
   }
   function zoom(factor, pointer = {x: viewport.width / 2, y: viewport.height / 2}) {
+    pauseForInteraction();
     fitted = false; view.camera = zoomAt(view.camera, factor, pointer, viewport, data.bounds); scheduleDraw();
   }
   function showHover(pointer) {
@@ -395,20 +463,175 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
   }
   const activation = createStarActivation({
     onSelect: id => { if (candidateIds.length > 1) showCandidates(candidateIds); else select(id, false, {preserveReleaseIdentity: true}); },
-    onEnterFocus: id => invoke('enter-focus', id),
+    onEnterFocus: id => {if(!tourOrigin)void invoke('enter-focus', id);},
   });
   function cancelInteraction() {
     activation.cancel(); releaseIds = []; closeCandidates();
     for (const id of pointers.keys()) if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id);
     pointers.clear(); hovered = null; $('.galaxy-tooltip').hidden = true;
   }
+  function tourError(error) {
+    if(error?.name==='AbortError'||destroyed)return;
+    $('.galaxy-announcement').textContent=t('tourFailed');
+  }
+  function updateTourControls(snapshot=tour?.getSnapshot()) {
+    if(!destroyed&&snapshot)tourControls?.update({...snapshot,rejoining,music:musicTrack,musicVolume,musicMode,scope:tourScope});
+  }
+  function syncTourMusic(snapshot=tour?.getSnapshot()) {
+    if(snapshot)tourMusic.sync({...snapshot,track:musicTrack,volume:musicVolume,mode:musicMode,status:active&&!destroyed&&!rejoining?snapshot.status:'paused'});
+  }
+  function setMusicPreference(key,value) {
+    if(key==='galaxyTourMusic')musicTrack=normalizeTourMusic(value);
+    else if(key==='galaxyTourMusicMode')musicMode=normalizeTourMusicMode(value);
+    else musicVolume=normalizeTourMusicVolume(value);
+    updateTourControls();syncTourMusic();
+  }
+  async function saveMusicPreference(key,value) {
+    const previous=key==='galaxyTourMusic'?musicTrack:key==='galaxyTourMusicMode'?musicMode:musicVolume,selection=++musicSelection;
+    musicPending.set(key,selection);setMusicPreference(key,value);
+    try {await onGalaxySettings?.({[key]:value});}
+    catch {
+      if(musicPending.get(key)===selection&&!destroyed){setMusicPreference(key,state.settings?.[key]??previous);$('.galaxy-announcement').textContent=t('tourMusicSaveFailed');}
+    } finally {
+      if(musicPending.get(key)===selection&&!destroyed){musicPending.delete(key);updateTourControls();syncTourMusic();}
+    }
+  }
+  function cancelRejoin() {
+    if(rejoinHandle)cancelAnimationFrame(rejoinHandle);
+    rejoinHandle=0;if(rejoining)pausedViewChanged=true;rejoining=false;
+    updateTourControls();
+  }
+  function restoreTour() {
+    const original=tourOrigin;
+    cancelRejoin();tourOrigin=null;tourFrame=null;tourScope=null;pausedViewChanged=false;
+    root.dataset.tourActive='false';root.dataset.tourInspecting='false';tourExclusionKey='';
+    if(!original||destroyed)return;
+    view={...original.view,camera:{...original.view.camera}};fitted=original.fitted;searchResultsOpen=original.searchResultsOpen;
+    if(!original.fullscreen)void fullscreen.exit();
+    setCopy();resize();
+    const target=original.focus?.isConnected&&original.focus.getClientRects().length?original.focus:$('[data-galaxy-action="tour"]');
+    target?.focus({preventScroll:true});
+  }
+  function exitTour(leaveFullscreen=false) {
+    cancelRejoin();tour?.exit();if(leaveFullscreen)void fullscreen.exit();
+  }
+  function pauseForInteraction() {
+    if(!tourOrigin)return;
+    cancelRejoin();tour.pause();pausedViewChanged=true;
+  }
+  function startOrResume() {
+    if(!active||!tourOrigin||rejoining)return;
+    root.dataset.tourInspecting='false';
+    if(!pausedViewChanged||!tourFrame||motion.matches) {
+      pausedViewChanged=false;tour.play();canvas.focus({preventScroll:true});return;
+    }
+    const from={...view.camera},to={...tourFrame.camera},started=performance.now();
+    rejoining=true;pausedViewChanged=false;
+    updateTourControls();
+    const move=now=>{
+      if(!active||destroyed||!tourOrigin)return;
+      const p=Math.min(1,(now-started)/650),ease=p*p*(3-2*p);
+      view.camera={x:from.x+(to.x-from.x)*ease,y:from.y+(to.y-from.y)*ease,
+        zoom:from.zoom+(to.zoom-from.zoom)*ease,angle:(from.angle||0)+((to.angle||0)-(from.angle||0))*ease};
+      draw();
+      if(p<1)rejoinHandle=requestAnimationFrame(move);
+      else {rejoinHandle=0;rejoining=false;tour.play();}
+    };
+    rejoinHandle=requestAnimationFrame(move);canvas.focus({preventScroll:true});
+  }
+  async function prepareTourScope(selection,{ifChanged=false}={}) {
+    if(destroyed)return;
+    const previous=tourScope;
+    tourScope=tourInterestScope(state,data,selection);
+    if(tourScope.mode!=='all')tourScopeSelections[tourScope.mode]=tourScope.ids;
+    if(ifChanged&&JSON.stringify(previous?.topics)===JSON.stringify(tourScope.topics)){updateTourControls();return;}
+    const topics=tourScope.topics,selected=tourOrigin?.view.selected??view.selected;
+    try {await tour.load({topics,...(topics.includes(selected)?{startId:selected}:{})});}
+    catch(error){tourError(error);}
+  }
+  async function prepareTour() {
+    if(!active||destroyed)return;
+    tourScopeSelections.group=[];tourScopeSelections.category=[];
+    await prepareTourScope({mode:'all'});
+  }
+  function tourAction(action,value) {
+    try {
+      if(['start','play'].includes(action))startOrResume();
+      else if(action==='pause'){cancelRejoin();tour.pause();}
+      else if(action==='exit')exitTour();
+      else if(action==='fullscreen')void fullscreen.toggle();
+      else if(action==='interests'){exitTour();onOpenInterests?.();}
+      else if(action==='scope-mode'&&['planning','ready','error'].includes(tourSnapshot?.status)&&['all','group','category'].includes(value))void prepareTourScope({mode:value,ids:tourScopeSelections[value]??[]});
+      else if(action==='scope-choice'&&tourScope&&['planning','ready','error'].includes(tourSnapshot?.status)) {
+        const ids=new Set(tourScope.ids);if(value.checked)ids.add(value.id);else ids.delete(value.id);
+        void prepareTourScope({mode:tourScope.mode,ids:[...ids]});
+      }
+      else if(action==='music-mode'&&validTourMusicMode(value))void saveMusicPreference('galaxyTourMusicMode',value);
+      else if(action==='music'&&validTourMusic(value))void saveMusicPreference('galaxyTourMusic',value);
+      else if(action==='music-volume-preview'&&validTourMusicVolume(value)){musicVolumePreview=true;setMusicPreference('galaxyTourMusicVolume',value);}
+      else if(action==='music-volume'&&validTourMusicVolume(value)){musicVolumePreview=false;void saveMusicPreference('galaxyTourMusicVolume',value);}
+      else if(['speed','loop','clean'].includes(action))tour.setOptions({[action]:value});
+      else if(['previous','next'].includes(action)) {
+        cancelRejoin();pausedViewChanged=false;root.dataset.tourInspecting='false';
+        const snapshot=tour.getSnapshot();
+        const offset=action==='next'?1:snapshot.phase==='hold'?-1:0;
+        const returning=['depart','travel'].includes(snapshot.phase)&&tourFrame?.legIndex===snapshot.stopIds.length-1;
+        const wrap=action==='next'&&snapshot.stopIndex===snapshot.stopIds.length-1&&(snapshot.loop||returning);
+        const index=wrap?0:Math.max(0,Math.min(snapshot.stopIds.length-1,snapshot.stopIndex+offset));
+        tour.seek(snapshot.stopTimes[index]);canvas.focus({preventScroll:true});
+      }
+    } catch(error){tourError(error);}
+  }
+  tourControls=createGalaxyTourControls({host:$('.galaxy-surface'),text:t,onAction:tourAction,getTopic:topicFor});
+  tour=createGalaxyTour({data,viewport,reducedMotion:motion.matches,
+    onChange:snapshot=>{
+      if(!tourOrigin&&!['idle','destroyed'].includes(snapshot.status)) {
+        tourOrigin={view:{...view,camera:{...view.camera}},fitted,searchResultsOpen,focus:document.activeElement,
+          fullscreen:document.fullscreenElement===root};
+        cancelInteraction();stopAnimation();view.domain=null;view.query='';view.selected=null;
+        fitted=false;searchResultsOpen=false;root.dataset.tourActive='true';root.dataset.tourInspecting='false';
+        renderResults();renderDetails();
+      }
+      tourSnapshot=snapshot;root.dataset.tourStatus=snapshot.status;
+      syncTourMusic(snapshot);
+      if(!destroyed) {
+        updateTourControls(snapshot);
+        tourControls.element.querySelector('[data-tour-action="interests"]').hidden=
+          !['empty','insufficient'].includes(snapshot.error?.code)||typeof onOpenInterests!=='function';
+      }
+      if(['idle','destroyed'].includes(snapshot.status)&&tourOrigin)restoreTour();
+    },
+    onFrame:next=>{
+      if(destroyed||!tourOrigin)return;
+      tourFrame=next;
+      syncTourMusic();
+      if(!pausedViewChanged&&!rejoining)view.camera={...next.camera};
+      fitted=false;
+      updateTourControls();
+      if(frame){cancelAnimationFrame(frame);frame=0;}
+      draw();
+    },
+    onStop:stop=>{if(!destroyed)$('.galaxy-announcement').textContent=t('tourStop',{current:stop.index+1,total:tour.getSnapshot().stopIds.length})+': '+stop.id;},
+  });
+  root.dataset.tourStatus='idle';root.dataset.tourActive='false';
+  on(document,'keydown',event=>{
+    if(!active||!tourOrigin||optionsDialog.open||layoutDialog.open||tourControls.element.querySelector('dialog').open)return;
+    if(event.target.closest?.('input,select,textarea,[contenteditable="true"]'))return;
+    if(event.key==='Escape'){event.preventDefault();event.stopPropagation();exitTour(true);}
+    else if(event.key===' '&&!event.target.closest?.('button')) {
+      event.preventDefault();event.stopPropagation();tourAction(rejoining||tour.getSnapshot().status==='playing'?'pause':'play');
+    } else if(['ArrowLeft','ArrowRight'].includes(event.key)) {
+      event.preventDefault();event.stopPropagation();tourAction(event.key==='ArrowLeft'?'previous':'next');
+    }
+  },true);
   function stopAnimation() { waves = []; if (frame) cancelAnimationFrame(frame); frame = 0; }
   on(root, 'click', event => {
     if (!active) return;
     const target = event.target.closest('button[data-galaxy-action]'); if (!target || !root.contains(target)) return;
     const action = target.dataset.galaxyAction, id = target.dataset.galaxyTopic;
     activation.cancel(); releaseIds = [];
-    if (action === 'select') {
+    if (action === 'tour') void prepareTour();
+    else if (action === 'select') {
       select(id);
       if (optionsDialog.open) { focusDetailOnOptionsClose=true; closeDialog(optionsDialog); }
       else $('.galaxy-detail h2')?.focus({preventScroll: true});
@@ -422,7 +645,7 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
     else if (action === 'zoom-in') zoom(1.3);
     else if (action === 'zoom-out') zoom(1 / 1.3);
     else if (action === 'clear-search') { view.query = ''; search.value = ''; renderResults(); search.focus(); }
-    else if (action === 'close-details') { view.selected = null; renderDetails(); renderResults(); renderCustom(); scheduleDraw(); }
+    else if (action === 'close-details') { root.dataset.tourInspecting='false';view.selected = null; renderDetails(); renderResults(); renderCustom(); scheduleDraw(); }
     else invoke(action, id);
   });
   on(root, 'keydown', event => {
@@ -468,12 +691,14 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
     else if (event.key === 'Home') reset();
     else if (event.key === 'Escape') { view.selected = null; renderDetails(); scheduleDraw(); }
     else if (event.key.startsWith('Arrow')) {
+      pauseForInteraction();
       fitted = false;
       view.camera = panCamera(view.camera, event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0, event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0, viewport, data.bounds); scheduleDraw();
     }
   });
   on(canvas, 'pointerdown', event => {
     if (!active || event.button !== 0) return;
+    pauseForInteraction();
     activation.cancel(); closeCandidates();
     const position = localPointer(event); pointers.set(event.pointerId, {...position, start: position, moved: false});
     if (pointers.size > 1) { activation.cancel(); releaseIds = []; pointers.forEach(pointer => { pointer.moved = true; }); }
@@ -522,8 +747,11 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
   on(canvas, 'pointerleave', () => { hovered = null; $('.galaxy-tooltip').hidden = true; scheduleDraw(); });
   const observer = new ResizeObserver(resize); observer.observe(canvas);
   on(window, 'resize', resize);
-  on(document, 'visibilitychange', () => { if (document.hidden) { cancelInteraction(); stopAnimation(); } else resize(); });
-  on(motion, 'change', () => { if (motion.matches) stopAnimation(); scheduleDraw(); });
+  on(window,'blur',()=>{musicAway=true;tourMusic.stop();});
+  on(window,'focus',()=>{musicAway=false;syncTourMusic();});
+  on(window,'pagehide',()=>{musicAway=true;tourMusic.stop();});
+  on(document, 'visibilitychange', () => { if (document.hidden) { musicAway=true;tourMusic.stop();cancelRejoin();tour?.pause();cancelInteraction(); stopAnimation(); } else {musicAway=!document.hasFocus();resize();} });
+  on(motion, 'change', () => { cancelRejoin();if (motion.matches) stopAnimation();void tour?.updateEnvironment({reducedMotion:motion.matches}).catch(tourError);scheduleDraw(); });
   refreshPersonalState(); setCopy(); resize();
 
   return {
@@ -532,23 +760,39 @@ export function createGalaxyMap({container, catalog, layout, state = {}, languag
       if (patch.state !== undefined) {
         const old = state.settings || {}, next = patch.state.settings || {};
         const resetState = state.salt !== patch.state.salt;
+        if(resetState){exitTour();musicPending.clear();musicVolumePreview=false;}
         if (resetState || old.endpoint !== next.endpoint || old.accessToken !== next.accessToken) layoutSession.invalidate();
         state = patch.state;
-        if (resetState) {data = prepareGalaxy(catalog,layout); fitted = true; view = restoreViewState({},data,customTopics().map(topic=>topic.id));}
+        if(!musicPending.has('galaxyTourMusic')&&(resetState||old.galaxyTourMusic!==next.galaxyTourMusic))musicTrack=normalizeTourMusic(state.settings?.galaxyTourMusic);
+        if(!musicPending.has('galaxyTourMusicMode'))musicMode=normalizeTourMusicMode(state.settings?.galaxyTourMusicMode);
+        if(!musicPending.has('galaxyTourMusicVolume')&&!musicVolumePreview)musicVolume=normalizeTourMusicVolume(state.settings?.galaxyTourMusicVolume);
+        if(tourScope&&['planning','ready','error'].includes(tourSnapshot?.status))void prepareTourScope(tourScope,{ifChanged:true});
+        if (resetState) {
+          data = prepareGalaxy(catalog,layout); fitted = true; view = restoreViewState({},data,customTopics().map(topic=>topic.id));
+          void tour.updateEnvironment({data,viewport}).catch(tourError);
+        }
       }
       if (patch.language !== undefined) language = patch.language;
-      refreshPersonalState(patch.state !== undefined); setCopy();
+      refreshPersonalState(patch.state !== undefined); setCopy();updateTourControls();syncTourMusic();
     },
     setActive(value) {
       if (destroyed) return;
-      const nextActive = Boolean(value); if (active && !nextActive) layoutSession.invalidate(); active = nextActive; if (!active) { if (optionsDialog.open) closeDialog(optionsDialog); if (layoutDialog.open) closeDialog(layoutDialog); } fullscreen.setActive(active);
-      if (!active) { cancelInteraction(); stopAnimation(); } else resize();
+      const nextActive = Boolean(value); if (active && !nextActive) {layoutSession.invalidate();cancelRejoin();tour.pause();} active = nextActive; if (!active) { if (optionsDialog.open) closeDialog(optionsDialog); if (layoutDialog.open) closeDialog(layoutDialog); } fullscreen.setActive(active);
+      if (!active) { tourMusic.stop();cancelInteraction(); stopAnimation(); } else resize();
     },
     openLayoutEditor,
+    showDomain(domain) {
+      if(destroyed || !data.domains.some(row=>row.id===domain))return false;
+      if(tourOrigin)exitTour();
+      cancelInteraction();view.domain=domain;view.query='';view.selected=null;searchResultsOpen=false;actionError=false;
+      fitted=true;view.camera=fitGalaxyCamera(data.bounds,viewport);setCopy();return true;
+    },
     invalidateLayout(){if(!destroyed)layoutSession.invalidate();},
-    getViewState() { return {...view, fitted, camera: {...view.camera}}; },
+    getTourController(){return tour;},
+    getViewState() { const current=tourOrigin?.view??view;return {...current, fitted:tourOrigin?.fitted??fitted, camera: {...current.camera}}; },
     destroy() {
       if (destroyed) return;
+      destroyed=true;musicSelection++;tourMusic.destroy();cancelRejoin();tour.destroy();tourControls.destroy();textWidths.clear();
       layoutSession.destroy(); layoutEditor.destroy(); fullscreen.destroy(); activation.destroy(); stopAnimation(); destroyed = true; observer.disconnect(); cleanups.forEach(cleanup => cleanup());
       for (const id of pointers.keys()) if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id);
       pointers.clear(); if (frame) cancelAnimationFrame(frame); root.remove();

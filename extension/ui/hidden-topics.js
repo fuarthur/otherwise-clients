@@ -1,3 +1,6 @@
+import {escapeHtml as escape} from './html.js';
+import {paginate} from './pagination.js';
+
 const copy = {
   title:['Hidden topics','已隐藏的主题'],
   help:['Restore topics to let them appear in future recommendations and browsing suggestions. Restoring does not save them as interests.','恢复后，主题可以再次出现在推荐和浏览建议中。恢复不会将其保存为兴趣。'],
@@ -18,7 +21,6 @@ const copy = {
   restored:['Topic restored.','主题已恢复。'],
 };
 
-const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const validId = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 120 && !/[\x00-\x1f\x7f]/.test(value);
 const disabled = value => value ? ' disabled' : '';
 const focusKey = id => `hidden-restore-${Array.from(id, char => char.codePointAt(0).toString(16)).join('-')}`;
@@ -32,11 +34,7 @@ export function hiddenTopicsPage(state, {query = '', page = 1} = {}) {
   const hidden = [...new Set((Array.isArray(state?.suppressed) ? state.suppressed : []).filter(validId))];
   const search = typeof query === 'string' ? query.trim().normalize('NFKC').toLowerCase() : '';
   const matching = search ? hidden.filter(id => id.normalize('NFKC').toLowerCase().includes(search)) : hidden;
-  const total = matching.length, pageCount = Math.max(1, Math.ceil(total / 10));
-  page = Math.min(pageCount, Math.max(1, Number.isFinite(page) ? Math.floor(page) : 1));
-  const offset = (page - 1) * 10;
-  return {items:matching.slice(offset, offset + 10), total, hiddenCount:hidden.length, page, pageCount,
-    start:total ? offset + 1 : 0, end:Math.min(offset + 10, total)};
+  return {...paginate(matching,page),hiddenCount:hidden.length};
 }
 
 export function hiddenTopicsView(state, {language = 'en', query = '', page = 1, pending = false} = {}) {

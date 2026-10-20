@@ -1,7 +1,6 @@
 // Real packaged catalog, isolated extension profile, synthetic personal state only.
-const {chromium} = await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
-import {mkdtemp, mkdir, rm, readFile, writeFile} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {launchExtension} from './browser-test-helpers.mjs';
+import {mkdir, readFile, writeFile} from 'node:fs/promises';
 import {resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
@@ -14,9 +13,8 @@ await mkdir(output, {recursive:true});
 const catalog = JSON.parse(await readFile(resolve(extension,'catalog.json')));
 const layout = JSON.parse(await readFile(resolve(extension,'galaxy-layout.json')));
 const data = prepareGalaxy(catalog, layout);
-const profile = await mkdtemp(resolve(tmpdir(), 'otherwise-galaxy-'));
 const errors = [], outbound = [], checks = [];
-let context;
+let context,base,close;
 const pause = () => new Promise(resolve => setTimeout(resolve, 80));
 async function until(fn) { for(let i=0;i<100;i++){ if(await fn())return; await pause(); } throw new Error('Expected Galaxy state did not arrive.'); }
 const mapReady = page => page.waitForFunction(() => Number(document.querySelector('.galaxy-canvas')?.dataset.zoom) > 0);
@@ -56,21 +54,16 @@ async function gestures(page, width) {
   await until(async()=> (await camera(page)).x!==beforeKeyboard.x);
   await page.keyboard.press('+');await until(async()=> (await camera(page)).zoom>beforeKeyboard.zoom);
   await page.keyboard.press('Home');await until(async()=> (await camera(page)).zoom===1);
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
   assert.ok((await canvas.boundingBox()).width<=width);
   checks.push(`${width}px zoom buttons, pointer wheel, drag without selection, keyboard pan/zoom/reset, no horizontal overflow`);
 }
 try {
-  context = await chromium.launchPersistentContext(profile, {
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),
-    headless:true,ignoreDefaultArgs:['--disable-extensions'],viewport:{width:1440,height:1000},
-    args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`,'--proxy-server=http://127.0.0.1:9'],
-  });
+  ({context, base, close}=await launchExtension({extension,profilePrefix:'otherwise-galaxy-',viewport:{width:1440,height:1000},args:['--proxy-server=http://127.0.0.1:9']}));
   context.on('page',page=>page.on('pageerror',error=>errors.push(error.message)));
   context.on('request',request=>{if(/^https?:/.test(request.url()))outbound.push(request.url());});
   await context.route('https://www.google.com/**',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><title>Synthetic search result</title><p>Isolated search fixture.</p>'}));
-  const worker=context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
-  const base=worker.url().replace('background.js','');
+
   const side=await context.newPage();await side.goto(base+'sidepanel.html');await side.locator('#welcome-guide').waitFor();await side.locator('[data-guide-action="skip"]').click();await side.locator('#welcome-guide').waitFor({state:'detached'});
   await side.locator('[data-view="map"]').click();await mapReady(side);
   assert.equal(await side.locator('.galaxy-root').getAttribute('data-topic-count'),String(catalog.length));
@@ -134,7 +127,7 @@ try {
     await dash.locator('.galaxy-search').fill('pSyChOlOgY');
     await dash.locator('.galaxy-search').press('Enter');await pause();
     assert.equal(await dash.locator('.galaxy-detail').getAttribute('data-selected-id'),'psychology');
-    assert.equal(await dash.evaluate(()=>document.documentElement.scrollWidth),width);
+    assert.ok(await dash.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     assert.ok(await dash.locator('.galaxy-result-list').evaluate(e=>e.clientHeight<=240),'Search results must not push the map down without bound');
     await dash.locator('.galaxy-toolbar').scrollIntoViewIfNeeded();
     await dash.screenshot({path:resolve(output,`dashboard-${width}-zh.png`),fullPage:true});
@@ -213,6 +206,5 @@ try {
   }
   throw error;
 } finally {
-  if(context)await context.close();
-  await rm(profile,{recursive:true,force:true});
+  await close?.();
 }

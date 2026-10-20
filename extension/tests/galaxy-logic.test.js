@@ -2,6 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {prepareGalaxy, searchTopics, restoreViewState, worldToScreen, screenToWorld, zoomAt, panCamera, hitTest, topicsInDomain} from '../ui/galaxy-logic.js';
 
+test('rotated cameras project, anchor zoom and pan in consistent screen directions', () => {
+  const bounds = {minX:-2,maxX:2,minY:-2,maxY:2}, viewport = {width:800,height:600};
+  const camera = {x:0,y:0,zoom:2,angle:Math.PI / 2}, world = {x:1,y:0};
+  const screen = worldToScreen(world,camera,viewport,bounds);
+  assert.ok(Math.abs(screen.x - 400) < 1e-9);
+  assert.ok(screen.y < 300);
+  const restored = screenToWorld(screen,camera,viewport,bounds);
+  assert.ok(Math.hypot(restored.x-world.x,restored.y-world.y) < 1e-9);
+  const zoomed = zoomAt(camera,1.5,screen,viewport,bounds);
+  const anchored = worldToScreen(world,zoomed,viewport,bounds);
+  assert.ok(Math.hypot(anchored.x-screen.x,anchored.y-screen.y) < 1e-9);
+  const panned = worldToScreen(world,panCamera(camera,40,20,viewport,bounds),viewport,bounds);
+  assert.ok(Math.hypot(panned.x-screen.x-40,panned.y-screen.y-20) < 1e-9);
+});
+
 const catalog = [
   {id: 'C', topic: 'C', domain: 'Arts', description: 'A description about pottery.'},
   {id: 'A', topic: 'Alpha computing', domain: 'Science', description: 'Original <literal> description.'},

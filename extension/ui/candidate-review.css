@@ -1,0 +1,74 @@
+.candidate-inbox.interest-draft-workspace { max-width: none; gap: 12px; padding: 16px; }
+.draft-heading { display: flex; flex-direction: column; gap: 6px; }
+.draft-heading h2 { font-size: 22px; }
+.draft-heading p { margin: 5px 0 0; line-height: 1.5; }
+.draft-unsaved { color: var(--sage); font-size: 12px; }
+.draft-modes { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); padding: 3px; background: var(--field); border: 1px solid var(--line); border-radius: 10px; gap: 3px; }
+.draft-modes button { border: 0; background: transparent; padding: 7px 3px; font-size: 12px; line-height: 1.3; min-height: 36px; white-space: normal; }
+.draft-modes button[aria-pressed=true] { background: var(--selected); color: var(--sage); box-shadow: inset 0 0 0 1px var(--control); }
+.interest-draft-workspace .draft-body { padding: 2px 5px 4px 1px; overflow-x: hidden; scrollbar-gutter: auto; }
+.draft-body strong, .draft-body h3, .draft-chip { overflow-wrap: anywhere; }
+.draft-row, .draft-background-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.draft-row > div, .draft-background-row > div { flex: 1; min-width: 0; }
+.draft-row strong, .draft-background-row strong { display: block; font-size: 14px; font-weight: 500; }
+.draft-row span, .draft-background-row span { display: block; margin-top: 3px; }
+.draft-row button { flex: 0 0 34px; width: 34px; min-height: 34px; padding: 0; color: var(--muted); font-size: 21px; border: 0; background: transparent; }
+.draft-row button:hover { color: var(--rose); background: var(--hover); }
+.draft-secondary { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.draft-secondary button, .draft-category-control button, .draft-category > button, .draft-folded button { font-size: 12px; min-height: 34px; padding: 6px 10px; }
+.draft-empty { text-align: center; padding: 24px 8px 12px; }
+.draft-empty h3 { font-size: 22px; margin-bottom: 10px; }
+.draft-empty p { font-size: 13px; }
+.draft-category { margin: 18px 0 22px; }
+.draft-category header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; }
+.draft-category h3 { font-size: 18px; }
+.draft-category-control { margin: 7px 0 10px; }
+.draft-category-control button { padding: 3px 0; border: 0; background: none; color: var(--sage); text-align: left; }
+.draft-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.draft-chip { display: flex; align-items: center; gap: 7px; cursor: pointer; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; background: var(--field); max-width: 100%; min-height: 40px; }
+.draft-chip.is-selected { border-color: var(--control); background: var(--selected); }
+.draft-chip input[type=checkbox] { margin: 0; width: 15px; height: 15px; }
+.draft-chip:has(input:focus-visible) { outline: 2px solid var(--sage); outline-offset: 2px; }
+.draft-card-area { text-align: center; padding: 2px 0 8px; }
+.draft-card-area > p { margin: 0 0 10px; }
+.candidate-swipe-card { position: relative; border: 1px solid var(--control); border-radius: 16px; background: linear-gradient(150deg,var(--selected),var(--surface)); padding: 24px 18px 16px; margin: 5px 3px 12px; min-height: 180px; display: flex; flex-direction: column; justify-content: center; cursor: grab; touch-action: pan-x; user-select: none; }
+.candidate-swipe-card:active { cursor: grabbing; }
+.candidate-swipe-card h3 { font-size: clamp(25px,4vw,33px); margin: 0 0 16px; }
+.candidate-swipe-card .eyebrow { font-size: 10px; }
+.draft-card-description { font-size: 13px; line-height: 1.6; color: var(--detail-ink); }
+.candidate-swipe-card[data-direction=up] { border-color: var(--sage); }
+.candidate-swipe-card[data-direction=down] { border-color: var(--rose); }
+.draft-swipe-label { font-size: 12px; position: absolute; top: 5px; left: 0; right: 0; color: var(--sage); }
+.candidate-swipe-card[data-direction=down] .draft-swipe-label { color: var(--rose); }
+.draft-card-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 12px; }
+.draft-card-actions button { flex: 1; padding: 8px 5px; font-size: 12px; line-height: 1.35; min-height: 40px; }
+.draft-folded { border-top: 1px solid var(--line); margin-top: 20px; padding-top: 12px; }
+.draft-folded summary { font-size: 12px; line-height: 1.5; }
+.draft-folded > p { margin: 10px 0 2px; }
+.draft-background-row button { flex-shrink: 0; max-width: 100px; }
+.draft-footer { display: grid; gap: 8px; }
+.draft-footer-tools { display: flex; justify-content: space-between; gap: 8px; }
+.draft-footer-tools button { min-height: 28px; padding: 3px 0; border: 0; background: transparent; font-size: 12px; color: var(--muted); text-align: left; }
+.draft-footer > .primary { width: 100%; min-height: 40px; }
+.interest-draft-workspace [aria-disabled=true] { opacity: .55; }
+.draft-card-description { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 1100px) {
+  body:has(.interest-draft-workspace) .app-header { margin-bottom: 14px; }
+  body:has(.interest-draft-workspace) .main-nav { padding-bottom: 8px; margin-bottom: 14px; }
+  .interests-page:has(.interest-draft-workspace) .interest-heading { margin-bottom: 12px; }
+  .interests-page:has(.interest-draft-workspace) .interest-heading p { display: none; }
+  .interests-page:has(.interest-draft-workspace) .interest-page-actions { margin-bottom: 8px; }
+  .interests-page:has(.interest-draft-workspace) .interests-tabs { margin-bottom: 12px; }
+  .interest-draft-workspace .draft-heading p { display: none; }
+  .candidate-swipe-card { padding: 18px 12px 12px; min-height: 155px; }
+  .candidate-swipe-card h3 { margin-bottom: 10px; }
+  .candidate-swipe-card p { margin-bottom: 8px; }
+}
+@media (max-height: 760px) {
+  .candidate-inbox.interest-draft-workspace { padding: 12px; gap: 8px; }
+  .draft-heading p { display: none; }
+}
+@media (min-width: 900px) {
+  .draft-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 18px; }
+  .draft-card-area { max-width: 450px; margin: auto; }
+}

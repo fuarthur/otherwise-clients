@@ -1,5 +1,6 @@
+import {escapeHtml as escape} from './html.js';
+
 const key = value => String(value ?? '').toLowerCase().replace(/[\s_\-\u2010-\u2015]+/gu,' ').trim();
-const escape = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const baseTitle = value => value.replace(/\s*\([^()]+\)$/u,'');
 
 /** Local input choices only. No embeddings, recommendations, or invented senses. */

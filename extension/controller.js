@@ -1,17 +1,20 @@
 import {restoreBackup} from './core/backup.js';
+import {summarizeStats} from './core/stats.js';
 import {createGalaxyLayoutTransport} from './galaxy-layout-transport.js';
 import {createState,reduceState,prepareObservation,hashUrl,buildRequest,isAllowedUrl} from './core/index.js';
 import {createFocusTransport} from './focus-transport.js';
 import {createConnectionStatusTransport} from './connection-status.js';
-import {cleanRecommendations,RecommendationResponseError} from './recommendation-response.js';
+import {cleanRecommendations,readRecommendationResponse,RecommendationResponseError} from './recommendation-response.js';
 import {proactiveSignature, proactiveProfileKey, proactiveRequest, readProactiveResponse} from './proactive/recommendations.js';
 import {normalizeEndpoint,hasServiceConnection,connectionHeaders} from './core/connection.js';
 import {GROUP_ACTIONS,cleanGroupName,recommendationInterests} from './core/interest-groups.js';
+import {titleSignatures} from './core/browsing-context.js';
+import {CANDIDATE_ACTIONS} from './core/candidate-draft.js';
 export {normalizeEndpoint} from './core/connection.js';
 
 const FEEDBACK_ACTIONS=new Set(['SET_DISCOVERY_FEEDBACK','CLEAR_CONCEPT_FEEDBACK','UNDO_DISCOVERY_FEEDBACK']);
-const PUBLIC_ACTIONS=new Set(['CLAIM_STATS','APPROVE','ADD_INTEREST','REMOVE_INTEREST','REMOVE_INTERESTS','UNDO_REMOVE_INTERESTS','CLEAR_INTEREST_UNDO','DISMISS','UNDO_DISMISS','RESTORE_HIDDEN','CLEAR_DISMISS_UNDO','POSTPONE_EXPLORATION','SET_SETTINGS','SET_FOCUS','CLEAR_DERIVED','RESET','CLEAR_ERROR',...FEEDBACK_ACTIONS,...GROUP_ACTIONS,'CLEAR_DISCOVERY_FEEDBACK']);
-const SETTING_KEYS=new Set(['proactiveEnabled','browsingEnabled','autoRefresh','mode','endpoint','accessToken','blockedDomains','language','theme','recommendationView','galaxyExplorationMode','galaxyLayoutOptions','galaxyShowDomainLabels','galaxyShowInterestLabels','recommendationOptions','recommendationKind','discoveryExploration','tutorialSeen', 'tutorialActive','soundEffectsEnabled','soundEffectsVolume']);
+const PUBLIC_ACTIONS=new Set(['CLAIM_STATS','APPROVE','ADD_INTEREST','REMOVE_INTEREST','REMOVE_INTERESTS','UNDO_REMOVE_INTERESTS','CLEAR_INTEREST_UNDO','DISMISS','UNDO_DISMISS','RESTORE_HIDDEN','CLEAR_DISMISS_UNDO','POSTPONE_EXPLORATION','SET_SETTINGS','SET_FOCUS','CLEAR_DERIVED','RESET','CLEAR_ERROR',...FEEDBACK_ACTIONS,...GROUP_ACTIONS,...CANDIDATE_ACTIONS,'CLEAR_DISCOVERY_FEEDBACK']);
+const SETTING_KEYS=new Set(['proactiveEnabled','browsingEnabled','autoRefresh','mode','endpoint','accessToken','blockedDomains','language','theme','recommendationView','galaxyExplorationMode','galaxyLayoutOptions','galaxyShowDomainLabels','galaxyShowInterestLabels','recommendationOptions','recommendationKind','discoveryExploration','tutorialSeen', 'tutorialActive','soundEffectsEnabled','soundEffectsVolume','galaxyTourMusic','galaxyTourMusicVolume','galaxyTourMusicMode','statsFollowSystemTimeZone','statsTimeZone']);
 const MAX_HISTORY=5000;
 class SafeError extends Error {}
 
@@ -97,15 +100,27 @@ export function createController({catalog,readState,writeState,historySearch,has
     if(!FEEDBACK_ACTIONS.has(action.type) && action.type !== 'CLEAR_DISCOVERY_FEEDBACK' && !(GROUP_ACTIONS.has(action.type) && action.deferRefresh === true) && result.after.settings.autoRefresh && recommendationInterests(result.after).length && hasServiceConnection(result.after.settings) && (requestKey(result.before)!==requestKey(result.after) || !result.before.settings.autoRefresh)) {
       void recommend().catch(()=>{});
     }
-    if (action.type==='CLAIM_STATS') return {...result.after,statsCelebration:(result.after.stats?.acknowledged||[]).filter(id=>!result.before.stats?.acknowledged.includes(id))};
+    if (action.type==='CLAIM_STATS') {
+      const pending=summarizeStats(result.before,{now:clock()}).pending;
+      return {...result.after,statsCelebration:(result.after.stats?.acknowledged||[]).filter(id=>pending.includes(id) && !result.before.stats?.acknowledged.includes(id))};
+    }
     return result.after;
   }
   async function makeObservations(items,current){
     const endpointHost=(()=>{try{return new URL(current.settings.endpoint).hostname;}catch{return '';}})();
     const blockedDomains=[...current.settings.blockedDomains,endpointHost].filter(Boolean);
     const observations=[];
-    for(const item of items.slice(0,MAX_HISTORY)){
-      const observation=await prepareObservation(item,catalog,{salt:current.salt,blockedDomains},clock());
+    const now=clock();
+    const eligible=items.slice(0,MAX_HISTORY).filter(item=>isAllowedUrl(item?.url,blockedDomains) &&
+      (!Number.isFinite(item.lastVisitTime) || item.lastVisitTime>=now-30*86400000 && item.lastVisitTime<=now+60000));
+    const signatures=titleSignatures(eligible);
+    const signatureHashes=new Map();
+    for(const row of current.evidence)if(row.signatureHash) {
+      if(!signatureHashes.has(row.host))signatureHashes.set(row.host,new Set());
+      signatureHashes.get(row.host).add(row.signatureHash);
+    }
+    for(const item of eligible){
+      const observation=await prepareObservation(item,catalog,{salt:current.salt,blockedDomains,signatures,signatureHashes},clock());
       if(observation) observations.push(observation);
     }
     return observations;
@@ -191,13 +206,11 @@ export function createController({catalog,readState,writeState,historySearch,has
         const messages={401:'The team access code was not accepted. Check Settings.',403:'This connection is not permitted.',404:'Update the recommendation service to use specific concepts.',422:specific?'Review your interests or clear outdated concept feedback and try again.':'Review your approved interests and try again.',429:'The service is busy. Try again shortly.',503:'The recommendation model is warming up. Try again shortly.'};
         throw new SafeError(messages[response.status] || 'The service could not complete this request. Try again.');
       }
-      const raw=await response.text(); if(raw.length>150000) throw new SafeError('The service response was too large.');
-      const result=JSON.parse(raw);const items=cleanRecommendations(result.recommendations,specific);
-      if(specific && (result.seed!==payload.seed || !/^[a-f0-9]{64}$/.test(result.graph_sha256 || '') || new Set(items.map(r=>r.discovery.concept_id)).size!==items.length)) throw new SafeError('The service returned an invalid graph concept.');
+      const {items,graphSha256}=await readRecommendationResponse(response,{specific,seed:payload.seed});
       if(!await hasEndpointPermission(endpoint)) return getState();
       return await serial(async()=>{
         if(state.generation!==current.generation || controller.signal.aborted) return snapshot();
-        return commit({type:'RECOMMENDATIONS',items,generation:current.generation,...(specific?{discovery:{seed:payload.seed,exposures:payload.exposures,graph_sha256:result.graph_sha256,rerank}}:{})});
+        return commit({type:'RECOMMENDATIONS',items,generation:current.generation,...(specific?{discovery:{seed:payload.seed,exposures:payload.exposures,graph_sha256:graphSha256,rerank}}:{})});
       });
     }catch(error){
       return await serial(async()=>{

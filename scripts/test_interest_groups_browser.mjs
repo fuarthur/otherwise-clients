@@ -5,7 +5,7 @@ import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output=resolve(root,'.cache/qa/interest-groups');await mkdir(output,{recursive:true});
 const temp=await mkdtemp(resolve(tmpdir(),'otherwise-group-browser-'));
@@ -31,16 +31,12 @@ const server=createServer(async(request,response)=>{
     {topic:'A new direction',domain:'Fixture',description:'A fictional recommendation for testing.'},
   ]}));
 });
-let context,page;
+let context,base,close,page;
 try {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  context=await chromium.launchPersistentContext(resolve(temp,'profile'),{
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),headless:true,
-    ignoreDefaultArgs:['--disable-extensions'],viewport:{width:390,height:850},
-    args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],
-  });
-  const worker=context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
-  const base=worker.url().replace('background.js','');page=await context.newPage();
+  ({context, base, close}=await launchExtension({extension,profile:resolve(temp,'profile'),viewport:{width:390,height:850}}));
+
+  page=await context.newPage();
   page.setDefaultTimeout(10000);page.on('pageerror',error=>errors.push(error.message));
   const action=action=>page.evaluate(action=>chrome.runtime.sendMessage({type:'ACTION',action}),action);
   const state=()=>page.evaluate(async()=> (await chrome.storage.local.get('state')).state);
@@ -137,5 +133,5 @@ try {
   await writeFile(resolve(output,'failure.json'),JSON.stringify({error:error.stack,errors,requests:requests.map(row=>({path:row.path,keywords:row.body.keywords?.length})),dialogs:await page?.locator('dialog').allTextContents()},null,2));
   throw error;
 } finally {
-  await context?.close();await new Promise(resolve=>server.close(resolve));await rm(temp,{recursive:true,force:true});
+  await close?.();await new Promise(resolve=>server.close(resolve));await rm(temp,{recursive:true,force:true});
 }

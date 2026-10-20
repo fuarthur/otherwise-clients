@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "license": "GPL-3.0-only",
-  "engines": {"node": ">=22"},
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test extension/tests/*.test.js && python3 -m unittest discover -s tests -v",
     "audit:public": "python3 scripts/public_boundary.py",
@@ -16,6 +18,10 @@
     "test:focus": "node scripts/test_focus_view_browser.mjs",
     "test:backup": "node scripts/test_backup_browser.mjs",
     "test:usability": "node scripts/test_usability_browser.mjs",
-    "test:exploration-review": "node scripts/test_exploration_review_browser.mjs"
+    "test:exploration-review": "node scripts/test_exploration_review_browser.mjs",
+    "test:interest-draft": "node scripts/test_interest_draft_browser.mjs",
+    "test:galaxy-tour": "node scripts/test_galaxy_tour_browser.mjs",
+    "test:stats": "node scripts/test_stats_browser.mjs",
+    "test:browser:critical": "npm run test:guide && npm run test:backup && npm run test:usability && npm run test:interest-draft"
   }
 }

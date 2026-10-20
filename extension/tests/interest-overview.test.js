@@ -37,3 +37,13 @@ test('overview recomputes after local changes and does not reuse removed topics'
   state.approved=[];state.explored=[];
   assert.equal(summarizeInterests(state).savedCount,0);assert.deepEqual(summarizeInterests(state).recent,[]);
 });
+
+test('catalog field distribution includes zero fields and classifies unknown interests without losing the denominator',()=>{
+  const state={approved:[topic('a','Computing'),topic('specific concept','Computing'),topic('c','Biology'),topic('d','Unknown'),topic('e','Custom'),topic('f','Math'),topic('f','Math')]};
+  const result=summarizeInterests(state,{domainNames:['Computing','Biology','Math','Philosophy','Visual arts']});
+  assert.equal(result.savedCount,6);
+  assert.equal(result.domainCount,3);
+  assert.equal(result.unclassifiedCount,2);
+  assert.deepEqual(result.domains,[{name:'Computing',count:2},{name:'Biology',count:1},{name:'Math',count:1},{name:'Philosophy',count:0},{name:'Visual arts',count:0}]);
+  assert.equal(result.otherClassifiedCount,0);
+});

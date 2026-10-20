@@ -51,7 +51,7 @@ The recorded fixture is `extension/focus-preview.v1.json`. Its example responses
 
 ## Visual and audio assets
 
-Website visuals and bundled sound effects were supplied for the OtherWise project. Sound source checksums and volume normalization are recorded in `extension/assets/sounds/provenance.json`. Bundled project artwork and audio are included under GPLv3 with this client release, except where another applicable notice states otherwise. External research pages and externally hosted video linked from the websites are not bundled or relicensed here.
+Website visuals, bundled sound effects, and the three Galaxy Tour music tracks (`starlit-drift.mp3`, `stellar-passage.mp3`, and `distant-echoes.mp3`) were supplied for the OtherWise project. Sound source checksums and volume normalization are recorded in `extension/assets/sounds/provenance.json`. Bundled project artwork and audio are included under GPLv3 with this client release, except where another applicable notice states otherwise. External research pages and externally hosted video linked from the websites are not bundled or relicensed here.
 
 ## Development tools
 

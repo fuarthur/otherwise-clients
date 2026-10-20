@@ -5,14 +5,13 @@ import {tmpdir} from 'node:os';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output=resolve(root,'.cache/qa/discovery');await mkdir(output,{recursive:true});
-const profile=await mkdtemp(resolve(tmpdir(),'otherwise-discovery-browser-'));
 const extension=await mkdtemp(resolve(tmpdir(),'otherwise-discovery-extension-'));
 await cp(resolve(root,'dist/otherwise-extension'),extension,{recursive:true});
 const manifest=JSON.parse(await readFile(resolve(extension,'manifest.json')));manifest.host_permissions=['http://127.0.0.1/*'];await writeFile(resolve(extension,'manifest.json'),JSON.stringify(manifest));
-const records=[],errors=[],checks=[];let context,fail=false;
+const records=[],errors=[],checks=[];let context,base,close,fail=false;
 const openSection=async(page,key)=>{const node=page.locator(`[data-disclosure="${key}"]`);if(await node.getAttribute('open')===null)await node.locator(':scope > summary').click();};
 const closeSection=async(page,key)=>{const node=page.locator(`[data-disclosure="${key}"]`);if(await node.getAttribute('open')!==null)await node.locator(':scope > summary').click();};
 const setLanguage=async(page,value)=>{await page.locator('[data-focus="nav-settings"]').click();await page.locator('#settings-language').selectOption(value);await page.waitForFunction(value=>document.documentElement.lang===value,value);await page.locator('[data-view="discover"]').click();};
@@ -32,9 +31,7 @@ const server=createServer(async(req,res)=>{
 try{
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const endpoint=`http://127.0.0.1:${server.address().port}`;
- context=await chromium.launchPersistentContext(profile,{executablePath:process.env.OTHERWISE_CHROMIUM||chromium.executablePath(),headless:true,ignoreDefaultArgs:['--disable-extensions'],viewport:{width:390,height:1000},args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`]});
- const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
- const base=worker.url().replace('background.js','');
+ ({context, base, close}=await launchExtension({extension,profilePrefix:'otherwise-discovery-browser-',viewport:{width:390,height:1000}}));
  const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
  await page.goto(base+'sidepanel.html?view=interests');
 
@@ -80,7 +77,7 @@ try{
  fail=false;await page.locator('[data-action="recommend"]').click();await page.locator('.topic-detail').first().waitFor();
  checks.push('language changes preserve source text and keep card feedback absent; service failures keep saved ratings and recover on refresh');
  for(const width of [1440,390,320]){
-  await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+  await page.setViewportSize({width,height:1000});assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
   await page.screenshot({path:resolve(output,`specific-${width}.png`),fullPage:true});
  }
  checks.push('specific controls, source paths and simplified topic details fit desktop, 390px and 320px');
@@ -106,4 +103,4 @@ try{
  assert.deepEqual(errors,[]);checks.push('clear removes feedback and exposure counts while retaining interests; requests contain no source URLs/history');
  await writeFile(resolve(output,'results.json'),JSON.stringify({checks,errors,requests:records.length},null,2));
  console.log(JSON.stringify({checks,errors,requests:records.length,output},null,2));
-}finally{await context?.close();server.close();await rm(profile,{recursive:true,force:true});await rm(extension,{recursive:true,force:true});}
+}finally{await close?.();server.close();await rm(extension,{recursive:true,force:true});}

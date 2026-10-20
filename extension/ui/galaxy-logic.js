@@ -68,6 +68,7 @@ export function clampCamera(camera, bounds) {
     x: clamp(Number.isFinite(camera?.x) ? camera.x : center.x, center.x - span * 2, center.x + span * 2),
     y: clamp(Number.isFinite(camera?.y) ? camera.y : center.y, center.y - span * 2, center.y + span * 2),
     zoom: clamp(Number.isFinite(camera?.zoom) ? camera.zoom : 1, .65, 20),
+    ...(Object.hasOwn(camera || {}, 'angle') ? {angle: clamp(Number.isFinite(camera.angle) ? camera.angle : 0, -Math.PI, Math.PI)} : {}),
   };
 }
 
@@ -86,12 +87,17 @@ export function cameraScale(camera, viewport, bounds) {
 
 export function worldToScreen(point, camera, viewport, bounds) {
   const scale = cameraScale(camera, viewport, bounds);
-  return {x: viewport.width / 2 + (point.x - camera.x) * scale, y: viewport.height / 2 - (point.y - camera.y) * scale};
+  const cos = Math.cos(camera.angle || 0), sin = Math.sin(camera.angle || 0);
+  const dx = point.x - camera.x, dy = point.y - camera.y;
+  return {x: viewport.width / 2 + (dx * cos - dy * sin) * scale,
+    y: viewport.height / 2 - (dx * sin + dy * cos) * scale};
 }
 
 export function screenToWorld(point, camera, viewport, bounds) {
   const scale = cameraScale(camera, viewport, bounds);
-  return {x: camera.x + (point.x - viewport.width / 2) / scale, y: camera.y - (point.y - viewport.height / 2) / scale};
+  const cos = Math.cos(camera.angle || 0), sin = Math.sin(camera.angle || 0);
+  const dx = (point.x - viewport.width / 2) / scale, dy = -(point.y - viewport.height / 2) / scale;
+  return {x: camera.x + dx * cos + dy * sin, y: camera.y - dx * sin + dy * cos};
 }
 
 export function zoomAt(camera, factor, pointer, viewport, bounds) {
@@ -103,7 +109,9 @@ export function zoomAt(camera, factor, pointer, viewport, bounds) {
 
 export function panCamera(camera, dx, dy, viewport, bounds) {
   const scale = cameraScale(camera, viewport, bounds);
-  return clampCamera({...camera, x: camera.x - dx / scale, y: camera.y + dy / scale}, bounds);
+  const cos = Math.cos(camera.angle || 0), sin = Math.sin(camera.angle || 0);
+  return clampCamera({...camera, x: camera.x - (dx * cos - dy * sin) / scale,
+    y: camera.y + (dx * sin + dy * cos) / scale}, bounds);
 }
 
 export function hitTest(hits, pointer, radius = 14) {

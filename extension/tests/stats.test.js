@@ -7,7 +7,7 @@ const now = at('2026-10-15T18:00:00Z');
 const topic = (id,domain='Science') => ({id,topic:id,domain,description:''});
 const event = (id,date,domain) => ({...topic(id,domain),at:at(date),parentId:null});
 test('activity counts daily unique topics, includes inactive days, and retains yesterday streak',()=>{
- const state={explored:[event('A','2026-10-13T12:00Z'),event('A','2026-10-13T13:00Z'),event('B','2026-10-14T12:00Z'),event('A','2026-10-14T13:00Z'),event('future','2026-10-16T12:00Z'),{id:'invalid',at:NaN}],stats:{timeZone:'UTC'}};
+ const state={settings:{statsFollowSystemTimeZone:false,statsTimeZone:'UTC'},explored:[event('A','2026-10-13T12:00Z'),event('A','2026-10-13T13:00Z'),event('B','2026-10-14T12:00Z'),event('A','2026-10-14T13:00Z'),event('future','2026-10-16T12:00Z'),{id:'invalid',at:NaN}],stats:{timeZone:'UTC'}};
  const summary=summarizeStats(state,{now,period:7});
  assert.equal(summary.total,2); assert.equal(summary.activeDays,2); assert.equal(summary.dailyAverage,3/7);
  assert.equal(summary.streak,2);assert.equal(summary.longestStreak,2);assert.equal(summary.calendar.length,7);
@@ -39,11 +39,11 @@ test('legacy migration excludes historical discoveries and suppresses historical
 });
 test('calendar arithmetic survives DST, leap day, year boundaries and reporting timezone changes',()=>{
  for(const dates of [['2026-03-07T19:00Z','2026-03-08T19:00Z','2026-03-09T19:00Z'],['2024-02-28T19:00Z','2024-02-29T19:00Z','2024-03-01T19:00Z'],['2025-12-30T19:00Z','2025-12-31T19:00Z','2026-01-01T19:00Z']]){
-  const state={stats:{timeZone:'America/Chicago'},explored:dates.map(date=>event('A',date))};
+  const state={settings:{statsFollowSystemTimeZone:false,statsTimeZone:'America/Chicago'},stats:{timeZone:'America/Chicago'},explored:dates.map(date=>event('A',date))};
   assert.equal(summarizeStats(state,{now:at(dates.at(-1))}).streak,3);
   assert.equal(summarizeStats(state,{now:at(dates.at(-1))+2*86400000}).streak,0);
  }
- const state={stats:{timeZone:'America/Chicago'},explored:[event('A','2026-10-15T02:00Z')]};
+ const state={settings:{statsFollowSystemTimeZone:false,statsTimeZone:'America/Chicago'},stats:{timeZone:'America/Chicago'},explored:[event('A','2026-10-15T02:00Z')]};
  assert.equal(summarizeStats(state,{now}).calendar.at(-2).count,1);
 });
 test('milestones are claimed only once and stale claims cannot affect a reset profile',()=>{

@@ -1,10 +1,13 @@
-import {initializeStats,validStatsSnapshot,acknowledgeHistory,summarizeStats} from './stats.js';
+import {initializeStats,validStatsSnapshot,acknowledgeHistory,summarizeStats,validTimeZone,reportingTimeZone,effectiveTimeZone,syncStatsTimeZone} from './stats.js';
 import {normalizeGalaxyLayoutOptions} from './galaxy-layout-options.js';
 import {LOCAL_ENDPOINT} from './connection.js';
 import {normalizeRecommendationOptions, validRecommendationOptions} from './recommendation-options.js';
 import {createDiscoveryState, normalizeDiscovery, cleanDiscoveryMetadata, discoveryPayload, isConceptId, validRating} from './discovery.js';
 import {GROUP_ACTIONS,normalizeInterestGroups,normalizeGroupScope,recommendationInterests,updateInterestGroups} from './interest-groups.js';
 import {DEFAULT_THEME,getTheme,normalizeThemeId} from './themes.js';
+import {DEFAULT_TOUR_MUSIC,validTourMusic,normalizeTourMusic,DEFAULT_TOUR_MUSIC_VOLUME,validTourMusicVolume,normalizeTourMusicVolume,DEFAULT_TOUR_MUSIC_MODE,validTourMusicMode,normalizeTourMusicMode} from './galaxy-tour-music.js';
+import {backgroundMatch,titleSuffix} from './browsing-context.js';
+import {emptyCandidateReview,normalizeCandidateReview,editCandidateReview} from './candidate-draft.js';
 
 const RETENTION_MS = 30 * 86_400_000;
 const MAX_TOPIC_LENGTH = 80;
@@ -36,10 +39,12 @@ export function createState(now = Date.now()) {
       recommendationOptions: normalizeRecommendationOptions(),
       galaxyLayoutOptions: normalizeGalaxyLayoutOptions(), galaxyShowDomainLabels: true, galaxyShowInterestLabels: true,
       recommendationKind: 'broad', discoveryExploration: .3,
-      soundEffectsEnabled: false, soundEffectsVolume: .2,
+      soundEffectsEnabled: false, soundEffectsVolume: .2, galaxyTourMusic: DEFAULT_TOUR_MUSIC, galaxyTourMusicVolume: DEFAULT_TOUR_MUSIC_VOLUME, galaxyTourMusicMode: DEFAULT_TOUR_MUSIC_MODE,
+      statsFollowSystemTimeZone: true, statsTimeZone: reportingTimeZone(),
       blockedDomains: [...DEFAULT_BLOCKED_DOMAINS], analysisSince: 0,
     },
     approved: [], baseline: [], candidates: [], evidence: [], suppressed: [],
+    candidateReview: emptyCandidateReview(),
     interestGroups: [], recommendationGroupIds: null,
     stats: null, explored: [], explorationPrompts: [], edges: [], recommendations: [], recommendationBatch: null, focus: null,
     lastError: null, lastUpdated: null, interestUndo: null, dismissalUndo: null,
@@ -140,20 +145,37 @@ function compiledCatalog(catalog) {
   return compiled;
 }
 
-export async function prepareObservation(historyItem, catalog, {salt, blockedDomains = DEFAULT_BLOCKED_DOMAINS}, now = Date.now()) {
+export async function prepareObservation(historyItem, catalog, {salt, blockedDomains = DEFAULT_BLOCKED_DOMAINS, signatures, signatureHashes}, now = Date.now()) {
   if (!historyItem || !isAllowedUrl(historyItem.url, blockedDomains) || typeof historyItem.title !== 'string' || !historyItem.title.trim()) return null;
   const seenAt = Number.isFinite(historyItem.lastVisitTime) ? historyItem.lastVisitTime : now;
   if (seenAt < now - RETENTION_MS || seenAt > now + 60_000) return null;
   const title = ' ' + phrase(historyItem.title) + ' ';
   const topics = [];
+  const background = [];
+  const host = new URL(historyItem.url).hostname.toLowerCase();
+  const suffix=titleSuffix(historyItem.title);
+  let signatureHash;
+  if(suffix && (signatures?.get(host)?.has(suffix) || signatureHashes?.get(host)?.size)) {
+    const hash=await hashUrl(`title-signature:${suffix}`,salt);
+    if(signatures?.get(host)?.has(suffix) || signatureHashes?.get(host)?.has(hash)) {
+      signatureHash=hash;
+      signatures=new Map(signatures);
+      signatures.set(host,new Set([...(signatures.get(host)||[]),suffix]));
+    }
+  }
   for (const {topic, phrases} of compiledCatalog(catalog)) {
-    if (phrases.some(normalized => title.includes(normalized)) && !topics.some(item => item.id === topic.id)) topics.push({...topic});
+    if (phrases.some(normalized => title.includes(normalized)) && !topics.some(item => item.id === topic.id)) {
+      topics.push({...topic});
+      const reason=backgroundMatch(historyItem.title,host,phrases,signatures);
+      if(reason)background.push({id:topic.id,reason});
+    }
   }
   if (!topics.length) return null;
-  const host = new URL(historyItem.url).hostname.toLowerCase();
   return {
     sourceHash: await hashUrl(historyItem.url, salt), host, seenAt,
     topicIds: topics.map(topic => topic.id), topics,
+    ...(background.length?{background}:{}),
+    ...(signatureHash?{signatureHash}:{}),
     source: host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtu.be' ? 'YouTube' : 'Chrome',
   };
 }
@@ -174,15 +196,20 @@ function recomputeCandidates(state, metadata) {
     if (hidden.has(id) || !metadata.get(id)) continue;
     let candidate = grouped.get(id);
     if (!candidate) {
-      candidate = {...metadata.get(id), count: 0, firstSeen: evidence.seenAt, lastSeen: evidence.seenAt, sources: []};
+      candidate = {...metadata.get(id), count: 0, contentCount:0, hosts:new Set(), backgroundReason:null, firstSeen: evidence.seenAt, lastSeen: evidence.seenAt, sources: []};
       grouped.set(id, candidate);
     }
     candidate.count++;
+    const background=evidence.background?.find(row=>row.id===id);
+    if(background)candidate.backgroundReason ||= background.reason;
+    else candidate.contentCount++;
+    candidate.hosts.add(evidence.host);
     candidate.firstSeen = Math.min(candidate.firstSeen, evidence.seenAt);
     candidate.lastSeen = Math.max(candidate.lastSeen, evidence.seenAt);
     if (!candidate.sources.includes(evidence.source)) candidate.sources.push(evidence.source);
   }
-  return [...grouped.values()].sort((a, b) => b.lastSeen - a.lastSeen || b.count - a.count || a.topic.localeCompare(b.topic));
+  return [...grouped.values()].map(({hosts,...row})=>({...row,siteCount:hosts.size,backgroundReason:row.contentCount?null:row.backgroundReason}))
+    .sort((a, b) => b.lastSeen - a.lastSeen || b.count - a.count || a.topic.localeCompare(b.topic));
 }
 
 function snapshotRecommendationBatch(state) {
@@ -348,14 +375,20 @@ function cleanEvidence(item, now) {
   try { if (new URL('https://' + item.host).hostname !== item.host.toLowerCase()) return null; }
   catch { return null; }
   const topicIds = [...new Set(item.topicIds.filter(value => validTopicText(value)))];
-  return topicIds.length ? {sourceHash: item.sourceHash, host: item.host, seenAt: item.seenAt, topicIds, source: item.source} : null;
+  const background=Array.isArray(item.background)?item.background.filter(row=>topicIds.includes(row?.id) && ['institution','signature'].includes(row.reason)).map(({id,reason})=>({id,reason})):[];
+  const signatureHash=typeof item.signatureHash==='string' && /^[a-f\d]{64}$/.test(item.signatureHash)?item.signatureHash:null;
+  return topicIds.length ? {sourceHash: item.sourceHash, host: item.host, seenAt: item.seenAt, topicIds, source: item.source,...(background.length?{background}:{}),...(signatureHash?{signatureHash}:{})} : null;
 }
 
 function updateSettings(state, patch, now) {
   if (!patch || typeof patch !== 'object') return;
+  if ('statsTimeZone' in patch && !validTimeZone(patch.statsTimeZone)) { state.lastError = 'Choose a valid timezone.'; return; }
+  if (patch.statsFollowSystemTimeZone === false && state.settings.statsFollowSystemTimeZone !== false && !('statsTimeZone' in patch)) {
+    patch = {...patch,statsTimeZone:effectiveTimeZone(state)};
+  }
   let changed = false;
   let error = null;
-  for (const name of ['proactiveEnabled', 'browsingEnabled', 'autoRefresh', 'mode', 'endpoint', 'accessToken', 'blockedDomains', 'language', 'theme', 'recommendationView', 'galaxyExplorationMode', 'galaxyLayoutOptions', 'galaxyShowDomainLabels', 'galaxyShowInterestLabels', 'recommendationOptions', 'recommendationKind', 'discoveryExploration', 'tutorialSeen', 'tutorialActive', 'soundEffectsEnabled', 'soundEffectsVolume']) {
+  for (const name of ['proactiveEnabled', 'browsingEnabled', 'autoRefresh', 'mode', 'endpoint', 'accessToken', 'blockedDomains', 'language', 'theme', 'recommendationView', 'galaxyExplorationMode', 'galaxyLayoutOptions', 'galaxyShowDomainLabels', 'galaxyShowInterestLabels', 'recommendationOptions', 'recommendationKind', 'discoveryExploration', 'tutorialSeen', 'tutorialActive', 'soundEffectsEnabled', 'soundEffectsVolume', 'galaxyTourMusic','galaxyTourMusicVolume','galaxyTourMusicMode', 'statsFollowSystemTimeZone', 'statsTimeZone']) {
     if (!(name in patch)) continue;
     let value = patch[name];
     if (name === 'galaxyLayoutOptions') {
@@ -368,11 +401,14 @@ function updateSettings(state, patch, now) {
       if (!validRecommendationOptions(value)) { error = 'Enter valid recommendation settings.'; continue; }
       value = normalizeRecommendationOptions({...state.settings.recommendationOptions, ...value});
     }
-    if (['proactiveEnabled', 'browsingEnabled', 'autoRefresh', 'galaxyExplorationMode', 'galaxyShowDomainLabels', 'galaxyShowInterestLabels', 'tutorialSeen', 'tutorialActive', 'soundEffectsEnabled'].includes(name) && typeof value !== 'boolean') continue;
+    if (['proactiveEnabled', 'browsingEnabled', 'autoRefresh', 'galaxyExplorationMode', 'galaxyShowDomainLabels', 'galaxyShowInterestLabels', 'tutorialSeen', 'tutorialActive', 'soundEffectsEnabled', 'statsFollowSystemTimeZone'].includes(name) && typeof value !== 'boolean') continue;
     if (name === 'soundEffectsVolume' && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)) continue;
     if (name === 'mode' && !['path', 'global'].includes(value)) continue;
     if (name === 'language' && !['en', 'zh-CN'].includes(value)) continue;
     if (name === 'theme' && !getTheme(value)) continue;
+    if (name === 'galaxyTourMusic' && !validTourMusic(value)) continue;
+    if (name === 'galaxyTourMusicVolume' && !validTourMusicVolume(value)) continue;
+    if (name === 'galaxyTourMusicMode' && !validTourMusicMode(value)) continue;
     if (name === 'recommendationView' && !['cards', 'list', 'single'].includes(value)) continue;
     if (name === 'recommendationKind' && !['broad', 'specific'].includes(value)) continue;
     if (name === 'discoveryExploration' && (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1)) continue;
@@ -392,7 +428,7 @@ function updateSettings(state, patch, now) {
       if (name === 'browsingEnabled' && value) state.settings.analysisSince = now;
       state.settings[name] = value;
       // Presentation preferences never change the profile or cancel work.
-      if (!['proactiveEnabled', 'language', 'theme', 'recommendationView', 'galaxyExplorationMode', 'galaxyLayoutOptions', 'galaxyShowDomainLabels', 'galaxyShowInterestLabels', 'tutorialSeen', 'tutorialActive', 'soundEffectsEnabled', 'soundEffectsVolume'].includes(name)) changed = true;
+      if (!['proactiveEnabled', 'language', 'theme', 'recommendationView', 'galaxyExplorationMode', 'galaxyLayoutOptions', 'galaxyShowDomainLabels', 'galaxyShowInterestLabels', 'tutorialSeen', 'tutorialActive', 'soundEffectsEnabled', 'soundEffectsVolume', 'galaxyTourMusic','galaxyTourMusicVolume','galaxyTourMusicMode', 'statsFollowSystemTimeZone', 'statsTimeZone'].includes(name)) changed = true;
     }
   }
   if (changed) {
@@ -455,6 +491,12 @@ export function reduceState(state, action, now = Date.now()) {
   if (typeof next.settings.galaxyExplorationMode !== 'boolean') next.settings.galaxyExplorationMode = false;
   if (typeof next.settings.proactiveEnabled !== 'boolean') next.settings.proactiveEnabled = false;
   if (typeof next.settings.soundEffectsEnabled !== 'boolean') next.settings.soundEffectsEnabled = false;
+  next.settings.galaxyTourMusic = normalizeTourMusic(next.settings.galaxyTourMusic);
+  next.settings.galaxyTourMusicVolume = normalizeTourMusicVolume(next.settings.galaxyTourMusicVolume);
+  next.settings.galaxyTourMusicMode = normalizeTourMusicMode(next.settings.galaxyTourMusicMode);
+  if (typeof next.settings.statsFollowSystemTimeZone !== 'boolean') next.settings.statsFollowSystemTimeZone = true;
+  if (!validTimeZone(next.settings.statsTimeZone)) next.settings.statsTimeZone = validTimeZone(next.stats?.timeZone) ? next.stats.timeZone : reportingTimeZone();
+  syncStatsTimeZone(next,now);
   if (typeof next.settings.soundEffectsVolume !== 'number' || !Number.isFinite(next.settings.soundEffectsVolume) || next.settings.soundEffectsVolume < 0 || next.settings.soundEffectsVolume > 1) next.settings.soundEffectsVolume = .2;
   // Existing installs can infer onboarding once, without retaining deleted baseline IDs.
   if (next.onboardingComplete === undefined) next.onboardingComplete = next.approved.length > 0 || next.baseline.length > 0;
@@ -463,6 +505,8 @@ export function reduceState(state, action, now = Date.now()) {
   const observations = action.type === 'INGEST' && Array.isArray(action.observations) ? action.observations : [];
   const metadata = candidateMetadata(next, observations);
   next.evidence = next.evidence.map(item => cleanEvidence(item, now)).filter(Boolean);
+  next.candidates = recomputeCandidates(next,metadata);
+  next.candidateReview = normalizeCandidateReview(next.candidateReview,next.candidates);
   if (GROUP_ACTIONS.has(action.type)) {
     const scopeKey = () => JSON.stringify([recommendationInterests(next).map(row => row.id),next.settings.mode]);
     const before = scopeKey(), error = updateInterestGroups(next,action,randomSalt);
@@ -480,12 +524,17 @@ export function reduceState(state, action, now = Date.now()) {
         if (!clean.topicIds.length) continue;
         const previous = evidence.get(clean.sourceHash);
         if (!previous) evidence.set(clean.sourceHash, clean);
-        else evidence.set(clean.sourceHash, {...previous, seenAt: Math.max(previous.seenAt, clean.seenAt), topicIds: [...new Set([...previous.topicIds, ...clean.topicIds])]});
+        else if(clean.seenAt>=previous.seenAt)evidence.set(clean.sourceHash,clean);
       }
       next.evidence = [...evidence.values()];
       break;
     }
     case 'APPROVE': addTopics(next, next.candidates.filter(topic => Array.isArray(action.ids) && action.ids.includes(topic.id)), now); break;
+    case 'REVIEW_CANDIDATES': next.candidateReview=editCandidateReview(next.candidateReview,next.candidates,action);break;
+    case 'CONFIRM_CANDIDATE_DRAFT':
+      addTopics(next,next.candidates.filter(topic=>next.candidateReview.selected.includes(topic.id)),now);
+      next.candidateReview.undo=null;
+      break;
     case 'ADD_INTEREST': addTopics(next, [action.topic], now); break;
     case 'REMOVE_INTEREST': removeInterests(next, [action.id]); break;
     case 'REMOVE_INTERESTS': removeInterests(next, action.ids); break;
@@ -532,7 +581,7 @@ export function reduceState(state, action, now = Date.now()) {
       if (parentId && parentId !== topic.id) next.edges.push({from: parentId, to: topic.id, at: now});
       break;
     }
-    case 'SET_SETTINGS': updateSettings(next, action.patch, now); break;
+    case 'SET_SETTINGS': updateSettings(next, action.patch, now); syncStatsTimeZone(next,now); break;
     case 'SET_DISCOVERY_FEEDBACK': {
       const conceptId = action.conceptId;
       const previous = next.discovery.feedback[conceptId];
@@ -570,10 +619,11 @@ export function reduceState(state, action, now = Date.now()) {
       }
       break;
     }
-    case 'CLEAR_DERIVED': next.evidence = []; next.settings.analysisSince = now; invalidate(next); break;
+    case 'CLEAR_DERIVED': next.evidence = []; next.candidateReview=emptyCandidateReview(); next.settings.analysisSince = now; invalidate(next); break;
     case 'DELETE_SOURCES': {
       const hashes = new Set(Array.isArray(action.hashes) ? action.hashes : []);
       next.evidence = action.all ? [] : next.evidence.filter(item => !hashes.has(item.sourceHash));
+      if(action.all)next.candidateReview=emptyCandidateReview();
       invalidate(next); break;
     }
     case 'RECOMMENDATIONS': {
@@ -605,6 +655,7 @@ export function reduceState(state, action, now = Date.now()) {
   if (next.dismissalUndo && !next.suppressed.includes(next.dismissalUndo.id)) next.dismissalUndo = null;
   next.explorationPrompts = normalizeExplorationPrompts(next);
   next.candidates = recomputeCandidates(next, metadata);
+  next.candidateReview = normalizeCandidateReview(next.candidateReview,next.candidates);
   return next;
 }
 

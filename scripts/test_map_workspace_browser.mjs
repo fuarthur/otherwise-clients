@@ -1,18 +1,16 @@
-import {tmpdir} from 'node:os';
 // Real packaged application, isolated profile and synthetic personal state.
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE||'playwright');
-import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
+import {launchExtension} from './browser-test-helpers.mjs';
+import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
-const root=resolve(dirname(fileURLToPath(import.meta.url)),'..'),profile=await mkdtemp(resolve(tmpdir(),'otherwise-map-workspace-'));
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output=resolve(root,'.cache/qa/map-workspace');await mkdir(output,{recursive:true});
-let context;const errors=[],outbound=[],checks=[];
+let context,base,close;const errors=[],outbound=[],checks=[];
 try{
- context=await chromium.launchPersistentContext(profile,{executablePath:process.env.OTHERWISE_CHROMIUM||chromium.executablePath(),headless:true,ignoreDefaultArgs:['--disable-extensions'],viewport:{width:1440,height:1000},args:[`--disable-extensions-except=${root}/dist/otherwise-extension`,`--load-extension=${root}/dist/otherwise-extension`]});
+ ({context, base, close}=await launchExtension({extension:resolve(root,'dist/otherwise-extension'),profilePrefix:'otherwise-map-workspace-',viewport:{width:1440,height:1000}}));
  context.on('request',r=>{if(/^https?:/.test(r.url()))outbound.push(r.url());});
  context.on('page',p=>p.on('pageerror',e=>errors.push(e.message)));
- const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker'),base=worker.url().replace('background.js','');
  const page=await context.newPage();await page.goto(base+'dashboard.html?view=map');await page.locator('#welcome-guide').waitFor();await page.locator('[data-guide-action="skip"]').click();await page.locator('#welcome-guide').waitFor({state:'detached'});
  // The task guide starts on Interests; skipping it keeps that page selected.
  await page.locator('[data-view="map"]').click();await page.locator('.galaxy-canvas').waitFor();
@@ -91,7 +89,7 @@ try{
  await page.locator('[data-view="settings"]').click();await page.locator('[data-disclosure="settings-discovery"] > summary').click();await page.locator('#galaxy-exploration-mode').check();await side.waitForFunction(async()=>((await chrome.storage.local.get('state')).state.settings.galaxyExplorationMode)===true);
  await page.locator('[data-view="map"]').click();
  await page.locator('.focus-search').fill('');
- for(const width of [1440,390,320]){await page.setViewportSize({width,height:1000});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);await page.screenshot({path:resolve(output,`focus-${width}.png`),fullPage:true});}
+ for(const width of [1440,390,320]){await page.setViewportSize({width,height:1000});assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));await page.screenshot({path:resolve(output,`focus-${width}.png`),fullPage:true});}
  checks.push('exploration setting persists and Focus fits desktop and narrow views');
  const keyboardPage=await context.newPage();await keyboardPage.goto(base+'dashboard.html?view=map');await keyboardPage.locator('.galaxy-canvas').waitFor();
  // A rejected, unmatched double-click must not leave a stale transition origin.
@@ -128,4 +126,4 @@ try{
  checks.push('localized timeout/version/permission/unavailable guidance preserves local neighbors and Settings entry without echoing unknown text');
  assert.deepEqual(errors,[]);assert.deepEqual(outbound,[]);
  await writeFile(resolve(output,'results.json'),JSON.stringify({checks,errors,outbound},null,2));console.log(JSON.stringify({passed:true,checks},null,2));
-}finally{await context?.close();await rm(profile,{recursive:true,force:true});}
+}finally{await close?.();}

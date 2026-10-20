@@ -1,5 +1,5 @@
 import {buildRequest} from '../core/index.js';
-import {cleanRecommendations} from '../recommendation-response.js';
+import {readRecommendationResponse} from '../recommendation-response.js';
 
 // Only inputs that actually affect this independent all-interest surface belong here.
 export function proactiveSignature(state){
@@ -18,10 +18,7 @@ export function proactiveRequest(state){
 }
 export async function readProactiveResponse(response,state,payload){
  if(!response.ok)throw new Error('Recommendations are temporarily unavailable.');
- const raw=await response.text();if(raw.length>150000)throw new Error('The response was too large.');
- const result=JSON.parse(raw),specific=state.settings.recommendationKind==='specific';
- const items=cleanRecommendations(result.recommendations,specific);
- if(specific && (result.seed!==payload.seed || !/^[a-f0-9]{64}$/.test(result.graph_sha256||'') || new Set(items.map(t=>t.discovery.concept_id)).size!==items.length))throw new Error('Invalid graph response.');
+ const {items}=await readRecommendationResponse(response,{specific:state.settings.recommendationKind==='specific',seed:payload.seed});
  const excluded=new Set([...state.approved.map(t=>t.id),...state.suppressed].map(s=>s.toLowerCase()));
  return items.filter(t=>{const id=t.id.toLowerCase();if(excluded.has(id))return false;excluded.add(id);return true;});
 }

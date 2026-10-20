@@ -5,7 +5,7 @@ import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output=resolve(root,'.cache/qa/usability');await mkdir(output,{recursive:true});
 const temp=await mkdtemp(resolve(tmpdir(),'otherwise-usability-'));
@@ -33,15 +33,9 @@ const server=createServer(async(request,response)=>{
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const endpoint=`http://127.0.0.1:${server.address().port}`;
-let context;
+let context,base,close;
 try{
-  context=await chromium.launchPersistentContext(resolve(temp,'profile'),{
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),headless:true,
-    ignoreDefaultArgs:['--disable-extensions'],viewport:{width:390,height:850},
-    args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],
-  });
-  const worker=context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
-  const base=worker.url().replace('background.js','');
+  ({context, base, close}=await launchExtension({extension,profile:resolve(temp,'profile'),viewport:{width:390,height:850}}));
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
   await page.goto(`${base}sidepanel.html?view=interests`);
   const action=(target,action)=>target.evaluate(action=>chrome.runtime.sendMessage({type:'ACTION',action}),action);
@@ -136,7 +130,7 @@ try{
     assert.equal(await target.locator('.hidden-topic-row').count(),1);
     for(const width of target===page?[320,390]:[1100]){
       await target.setViewportSize({width,height:850});
-      assert.equal(await target.evaluate(()=>document.documentElement.scrollWidth),width);
+      assert.ok(await target.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
       await target.screenshot({path:resolve(output,`hidden-${width}-zh.png`),fullPage:true});
     }
   }
@@ -145,5 +139,5 @@ try{
   await writeFile(resolve(output,'results.json'),JSON.stringify({passed:true,checks},null,2));
   console.log(JSON.stringify({passed:true,checks},null,2));
 }finally{
-  releaseStatus?.();await context?.close();await new Promise(resolve=>server.close(resolve));await rm(temp,{recursive:true,force:true});
+  releaseStatus?.();await close?.();await new Promise(resolve=>server.close(resolve));await rm(temp,{recursive:true,force:true});
 }

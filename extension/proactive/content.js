@@ -113,6 +113,6 @@
   document.addEventListener('yt-navigate-start',()=>{navigating=true;sequence++;remove();});
   document.addEventListener('yt-navigate-finish',()=>{navigating=false;wake();});
   window.addEventListener('popstate',wake);
-  document.addEventListener('visibilitychange',schedule);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')wake();else schedule();});
   globalThis.__otherwiseProactive={wake};schedule();
 })();

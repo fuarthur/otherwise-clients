@@ -1,25 +1,19 @@
 // Optional UI regression checks. Only temporary profiles and fictional topics are used.
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
-import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
+import {launchExtension} from './browser-test-helpers.mjs';
+import {mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {resolve,dirname} from 'node:path';
-import {tmpdir} from 'node:os';
 import assert from 'node:assert/strict';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output=resolve(root,'.cache/qa/ui-redesign/browser');await mkdir(output,{recursive:true});
-const profile=await mkdtemp(resolve(tmpdir(),'otherwise-ui-'));
 const extension=resolve(root,'dist/otherwise-extension');
-let context;const checks=[],errors=[],outbound=[];
+let context,base,close;const checks=[],errors=[],outbound=[];
 try{
-  context=await chromium.launchPersistentContext(profile,{
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),
-    headless:true,ignoreDefaultArgs:['--disable-extensions'],viewport:{width:390,height:850},
-    args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],
-  });
+  ({context, base, close}=await launchExtension({extension,profilePrefix:'otherwise-ui-',viewport:{width:390,height:850}}));
   context.on('request',request=>{if(/^https?:/.test(request.url()))outbound.push(request.url());});
-  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
-  const base=worker.url().replace('background.js','sidepanel.html');
+
+  base+='sidepanel.html';
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
   await page.goto(base+'?preview=1');await page.locator('[data-focus="nav-settings"]').waitFor();
   const openSection=async(target,key)=>{const section=target.locator(`[data-disclosure="${key}"]`);if(await section.getAttribute('open')===null)await section.locator(':scope > summary').click();};
@@ -83,12 +77,10 @@ try{
   checks.push('Save keeps batch/cursor/source/time across repeated saves and layouts; manual refresh replaces it; leaving expires retained results');
 
   await page.goto(base+'?preview=1&view=interests');await page.locator('#manual-interest').waitFor();
-  const rows=page.locator('.candidate-row');
-  const next=page.locator('[data-action="candidate-next"]');
-  const previous=page.locator('[data-action="candidate-prev"]');
+  const rows=page.locator('.draft-row');
   await seed(103);
   const savedTab=page.getByRole('tab',{name:/Saved/});
-  const reviewTab=page.getByRole('tab',{name:/To review/});
+  const reviewTab=page.getByRole('tab',{name:/Interest draft/});
   assert.equal(await savedTab.getAttribute('aria-selected'),'true');
   assert.equal(await rows.count(),0,'Saved tab does not render browsing candidates');
   await page.locator('#manual-interest').fill('Gardening draft');
@@ -104,7 +96,8 @@ try{
   await page.keyboard.press('Escape');
   assert.equal(await page.getByRole('dialog').count(),0);
   assert.equal(await page.locator('#recommendation-kind').count(),0,'Interest management must not contain recommendation controls');
-  await page.locator('[data-candidate="Topic 001"]').check();
+  await page.locator('.draft-modes [data-mode="groups"]').click();
+  await page.locator('[data-review-candidate="Topic 001"]').check();
   await page.locator('[data-view="discover"]').click();
   assert.equal(await page.locator('#manual-interest, .candidate-inbox').count(),0,'Discover must not contain keyword input or browsing candidates');
   assert.equal(await page.locator('#recommendation-kind').count(),1);
@@ -113,26 +106,23 @@ try{
   await savedTab.click();
   assert.equal(await page.locator('#manual-interest').inputValue(),'Gardening draft');
   await reviewTab.click();
-  assert.equal(await page.locator('[data-candidate="Topic 001"]').isChecked(),true);
-  await page.locator('[data-candidate="Topic 001"]').uncheck();
+  assert.equal(await page.locator('[data-review-candidate="Topic 001"]').isChecked(),true);
+  await page.locator('[data-review-candidate="Topic 001"]').uncheck();
   checks.push('Saved/To review tabs and main navigation preserve drafts and selections; arrow/Home/End tabs and Escape dialog work');
-  assert.equal(await rows.count(),5);assert.equal(await previous.isDisabled(),true);
-  assert.match(await page.locator('.page-status').innerText(),/1.*21/);
-  await page.locator('[data-candidate="Topic 001"]').check();
-  await next.click();
-  await page.locator('[data-candidate="Topic 006"]').check();
-  await page.locator('[data-action="select-all"]').click();
-  assert.equal(await rows.locator('input:checked').count(),5);
-  assert.match(await page.locator('.selection-count').innerText(),/6/);
-  await previous.click();assert.equal(await page.locator('[data-candidate="Topic 001"]').isChecked(),true);
-  assert.equal(await rows.locator('input:checked').count(),1);
+  await page.locator('[data-review-candidate="Topic 001"]').check();
+  assert.equal((await getPreview()).candidateReview.selected.length,6);
+  assert.equal(await page.locator('[data-review-candidate]').count(),8);
+  await page.locator('[data-review-action="more"]').click();
+  assert.equal(await page.locator('[data-review-candidate]').count(),24);
+  assert.equal(await page.locator('[data-review-candidate="Topic 001"]').isChecked(),true);
   for(const width of [320,390]){
     await page.setViewportSize({width,height:850});
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     assert.ok(await page.evaluate(()=>document.documentElement.scrollHeight<=window.innerHeight),'Review does not grow the outer page');
     assert.ok((await page.locator('.review-footer').boundingBox()).y+(await page.locator('.review-footer').boundingBox()).height<=850,'Footer remains in the viewport');
   }
-  checks.push('103 candidates use five-row pages; visible-page selection preserves other pages and review footer fits narrow viewports');
+  await page.locator('.draft-modes [data-mode="draft"]').click();
+  checks.push('103 candidates use bounded category lists with show-more; draft selection persists and confirmation fits narrow viewports');
 
   const interests=await context.newPage();
   await interests.goto(base+'?preview=1&view=interests');
@@ -179,7 +169,7 @@ try{
   assert.equal(await interests.locator('.saved-interest-name').evaluate(el=>getComputedStyle(el).whiteSpace),'normal');
   for(const width of [320,390]){
     await interests.setViewportSize({width,height:850});
-    assert.equal(await interests.evaluate(()=>document.documentElement.scrollWidth),width);
+    assert.ok(await interests.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
   }
   await interests.locator('#saved-interest-search').evaluate(input=>{
     input.focus();input.dispatchEvent(new CompositionEvent('compositionstart',{bubbles:true}));
@@ -202,10 +192,10 @@ try{
   assert.deepEqual(await page.locator('#manual-interest').evaluate(input=>[document.activeElement===input,input.selectionStart,input.selectionEnd]),[true,4,9]);
   assert.equal(await page.locator('#interest-language-help').count(),0);
   assert.equal(await page.locator('#manual-interest').getAttribute('aria-describedby'),'manual-interest-choices');
-  await page.getByRole('tab',{name:/待确认/}).click();
+  await page.getByRole('tab',{name:/兴趣草稿/}).click();
   assert.match(await rows.first().innerText(),/Topic 001/);
   assert.match(await rows.first().innerText(),/Fixture field/);
-  assert.match(await page.locator('.selection-count').innerText(),/6/);
+  assert.match(await page.locator('#candidate-review-status').innerText(),/6/);
   await page.locator('[data-focus="nav-settings"]').click();
   await openSection(page,'settings-connection');
   await page.locator('#endpoint').fill('https://example.org');
@@ -223,17 +213,19 @@ try{
   await page.locator('[data-action="approve"]').click();
   assert.equal((await getPreview()).approved.length,7);
   assert.equal((await getPreview()).candidates.length,97);
-  assert.match(await page.locator('.selection-count').innerText(),/0/);
+  assert.match(await page.locator('#candidate-review-status').innerText(),/0/);
   await page.reload();
-  assert.equal(await page.getByRole('tab',{name:/To review/}).getAttribute('aria-selected'),'true','Reload remembers the review tab');
+  assert.equal(await page.getByRole('tab',{name:/Interest draft/}).getAttribute('aria-selected'),'true','Reload remembers the review tab');
   await previewAction({type:'RESET'});await seed(21);
-  await page.getByRole('tab',{name:/To review/}).click();
-  for(let i=0;i<4;i++)await next.click();
-  assert.equal(await rows.count(),1);
-  await rows.first().locator('[data-action="dismiss"]').click();
-  assert.equal(await rows.count(),5);assert.equal(await next.isDisabled(),true);
-  assert.match(await page.locator('.page-status').innerText(),/4.*4/);
-  checks.push('cross-page save confirms the selected total; removing final page clamps safely');
+  await page.getByRole('tab',{name:/Interest draft/}).click();
+  await page.locator('.draft-modes [data-mode="cards"]').click();
+  const ignored=await page.locator('[data-review-card]').getAttribute('data-review-card');
+  await page.locator('[data-review-action="ignore"]').click();
+  assert.ok((await getPreview()).candidateReview.ignored.includes(ignored));
+  assert.deepEqual((await getPreview()).suppressed,[]);
+  await page.locator('[data-review-action="undo"]').click();
+  assert.equal((await getPreview()).candidateReview.ignored.includes(ignored),false);
+  checks.push('Explicit confirmation saves only the draft; candidate ignore is separate from recommendation suppression and supports Undo');
 
   await previewAction({type:'ADD_INTEREST',topic:{id:'Gardening',topic:'Gardening',domain:'Nature',description:'Growing plants.'}});
   await page.locator('[data-view="discover"]').click();
@@ -277,10 +269,10 @@ try{
     assert.equal(await page.locator('.topic-row[aria-current="true"] .topic-row-title').innerText(),title);
     const after=await getPreview();
     assert.deepEqual(after.recommendations,before.recommendations);assert.equal(after.generation,before.generation);assert.equal(after.lastUpdated,before.lastUpdated);
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     await page.screenshot({path:resolve(output,`${width}-browse.png`),fullPage:true});
     await page.locator('[data-action="recommendation-view"][data-value="single"]').click();
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     await page.screenshot({path:resolve(output,`${width}-single.png`),fullPage:true});
     checks.push(`${width}px: Browse and One at a time preserve selection, batch and description state; search/save remain accessible; no overflow`);
   }
@@ -347,7 +339,7 @@ try{
       await page.setViewportSize({width,height:900});
       for(const view of ['cards','single']){
         await page.locator(`[data-value="${view}"]`).click();
-        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
         const theme=await page.evaluate(()=>({background:getComputedStyle(document.body).backgroundColor,ink:getComputedStyle(document.body).color}));
         const channels=color=>color.match(/[\d.]+/g).slice(0,3).map(Number);
         const [red,green,blue]=channels(theme.background);
@@ -360,7 +352,6 @@ try{
   }
   await page.emulateMedia({colorScheme:'light'});
   checks.push('night-sky theme remains dark in both system appearances and fits both Discover views at 390/1100px');
-
   const settings=await context.newPage();settings.on('pageerror',e=>errors.push(e.message));
   await settings.goto(base+'?preview=1');await settings.locator('[data-focus="nav-settings"]').waitFor();
   await settings.locator('[data-focus="nav-settings"]').click();
@@ -397,7 +388,7 @@ try{
     await settings.setViewportSize({width,height:850});
     await settings.locator('#settings-language').selectOption('zh-CN');
     await settings.locator('.recommendation-settings').scrollIntoViewIfNeeded();
-    assert.equal(await settings.evaluate(()=>document.documentElement.scrollWidth),width);
+    assert.ok(await settings.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     await settings.screenshot({path:resolve(output,`${width}-recommendation-settings-zh.png`)});
   }
   await settings.locator('#settings-form button[type="submit"]').click();
@@ -443,7 +434,7 @@ try{
   await actual.locator('[data-view="map"]').click();
   assert.match(await actual.locator('#guide-heading').innerText(),/Get your first recommendations/);
   await actual.locator('[data-view="interests"]').click();assert.match(await actual.locator('#guide-heading').innerText(),/Get your first recommendations/);
-  assert.equal(await actual.evaluate(()=>document.documentElement.scrollWidth),390);
+  assert.ok(await actual.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
   await actual.screenshot({path:resolve(output,'390-inline-guide.png')});
   const wide=await context.newPage();wide.on('pageerror',e=>errors.push(e.message));
   await wide.setViewportSize({width:1440,height:1000});
@@ -453,8 +444,8 @@ try{
   assert.equal(await wide.locator('#guide-heading').evaluate(node=>document.activeElement===node),true,'Reopening guide moves keyboard focus to its heading without trapping it');
   for(const view of ['interests','discover','map']){
     await wide.locator(`[data-view="${view}"]`).click();
-    const bounds=await wide.evaluate(()=>{const main=document.querySelector('#main-view').getBoundingClientRect(),guide=document.querySelector('#welcome-guide').getBoundingClientRect();return {mainRight:main.right,guideLeft:guide.left,width:document.documentElement.scrollWidth};});
-    assert.ok(bounds.guideLeft>=bounds.mainRight,'Guide sits beside the corresponding page');assert.equal(bounds.width,1440);
+    const bounds=await wide.evaluate(()=>{const main=document.querySelector('#main-view').getBoundingClientRect(),guide=document.querySelector('#welcome-guide').getBoundingClientRect();return {mainRight:main.right,guideLeft:guide.left,width:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth};});
+    assert.ok(bounds.guideLeft>=bounds.mainRight,'Guide sits beside the corresponding page');assert.ok(bounds.width<=bounds.clientWidth,'The guide stays inside the viewport');
     assert.equal(await wide.locator(':modal').count(),0);
     if(view==='map'){
       await wide.locator('.galaxy-canvas').waitFor();
@@ -479,7 +470,7 @@ try{
   await wide.setViewportSize({width:320,height:1000});
   for(const view of ['interests','discover','map']){
     await wide.locator(`[data-view="${view}"]`).click();
-    assert.equal(await wide.evaluate(()=>document.documentElement.scrollWidth),320);
+    assert.ok(await wide.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     const bounds=await wide.evaluate(()=>{const main=document.querySelector('#main-view').getBoundingClientRect(),guide=document.querySelector('#welcome-guide').getBoundingClientRect();return {mainTop:main.top,guideBottom:guide.bottom};});
     assert.ok(bounds.mainTop>=bounds.guideBottom,'Narrow guide flows above the page without overlap');
     await wide.screenshot({path:resolve(output,`320-inline-guide-${view}-zh.png`)});
@@ -516,6 +507,5 @@ try{
   await writeFile(resolve(output,'results.json'),JSON.stringify({passed:true,checks},null,2));
   console.log(JSON.stringify({passed:true,checks},null,2));
 }finally{
-  if(context)await context.close();
-  await rm(profile,{recursive:true,force:true});
+  await close?.();
 }

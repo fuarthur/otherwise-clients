@@ -1,26 +1,19 @@
 // Uses a temporary Chrome profile and fictional interests only.
-const {chromium} = await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
-import {mkdtemp,mkdir,rm,readFile,writeFile} from 'node:fs/promises';
+import {launchExtension} from './browser-test-helpers.mjs';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {tmpdir} from 'node:os';
 import assert from 'node:assert/strict';
 const root = resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output = resolve(root,'.cache/qa/backup'); await mkdir(output,{recursive:true});
-const profile = await mkdtemp(resolve(tmpdir(),'otherwise-backup-'));
 const extension = resolve(root,'dist/otherwise-extension');
-let context;
+let context,base,close;
 const errors = [], outbound = [], checks = [];
 try {
-  context = await chromium.launchPersistentContext(profile,{
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),headless:true,
-    ignoreDefaultArgs:['--disable-extensions'],viewport:{width:390,height:850},acceptDownloads:true,
-    args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],
-  });
+  ({context, base, close}=await launchExtension({extension,profilePrefix:'otherwise-backup-',viewport:{width:390,height:850},acceptDownloads:true}));
   context.on('request',request=>{if (/^https?:/.test(request.url())) outbound.push(request.url());});
-  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
   const page = await context.newPage();page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(worker.url().replace('background.js','sidepanel.html?view=settings'));
+  await page.goto(base+'sidepanel.html?view=settings');
   await page.locator('[data-focus="settings-backup"]').click();
   const action = action => page.evaluate(action=>chrome.runtime.sendMessage({type:'ACTION',action}),action);
   const state = () => page.evaluate(async()=> (await chrome.storage.local.get('state')).state);
@@ -72,7 +65,7 @@ try {
   await choose(raw);await page.locator('.backup-dialog').waitFor();
   for (const width of [390,320,1100]) {
     await page.setViewportSize({width,height:850});
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     assert.equal(await page.locator('.backup-dialog').evaluate(el=>el.scrollWidth <= el.clientWidth),true);
     await page.screenshot({path:resolve(output,`${width}-review-zh.png`)});
   }
@@ -88,6 +81,5 @@ try {
   await writeFile(resolve(output,'results.json'),JSON.stringify({passed:true,checks},null,2));
   console.log(JSON.stringify({passed:true,checks},null,2));
 } finally {
-  if (context) await context.close();
-  await rm(profile,{recursive:true,force:true});
+  await close?.();
 }

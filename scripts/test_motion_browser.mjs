@@ -1,24 +1,18 @@
 // Real page checks use an isolated browser profile and the fictional preview state.
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
-import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
+import {launchExtension} from './browser-test-helpers.mjs';
+import {mkdir,writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {resolve,dirname} from 'node:path';
-import {tmpdir} from 'node:os';
 import assert from 'node:assert/strict';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output=resolve(root,'.cache/qa/ui-motion');await mkdir(output,{recursive:true});
-const profile=await mkdtemp(resolve(tmpdir(),'otherwise-motion-'));
 const checks=[],errors=[],metrics={};
-let context;
+let context,base,close;
 try {
-  context=await chromium.launchPersistentContext(profile,{
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),
-    headless:true,ignoreDefaultArgs:['--disable-extensions'],viewport:{width:390,height:850},
-    args:[`--disable-extensions-except=${root}/dist/otherwise-extension`,`--load-extension=${root}/dist/otherwise-extension`],
-  });
-  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
-  const base=worker.url().replace('background.js','sidepanel.html');
+  ({context, base, close}=await launchExtension({extension:resolve(root,'dist/otherwise-extension'),profilePrefix:'otherwise-motion-',viewport:{width:390,height:850}}));
+
+  base+='sidepanel.html';
   const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   await page.goto(base+'?preview=1');await page.locator('[data-focus="nav-settings"]').waitFor();
   const navigation=await page.evaluate(()=>{
@@ -309,6 +303,6 @@ try {
   assert.deepEqual(errors,[]);
 } finally {
   await writeFile(resolve(output,'results.json'),JSON.stringify({checks,errors,metrics},null,2));
-  await context?.close();await rm(profile,{recursive:true,force:true});
+  await close?.();
 }
 console.log(JSON.stringify({checks,errors},null,2));

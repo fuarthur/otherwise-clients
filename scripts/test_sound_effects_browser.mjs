@@ -1,22 +1,16 @@
 // Real packaged extension, native audio, temporary profile and fictional saved interests.
 import assert from 'node:assert/strict';
-import {mkdtemp, rm, mkdir, writeFile} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {mkdir, writeFile} from 'node:fs/promises';
 import {resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-const {chromium} = await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, '.cache/qa/sound-effects');
 const extension = resolve(root, 'dist/otherwise-extension');
-const profile = await mkdtemp(resolve(tmpdir(), 'otherwise-sounds-'));
 const errors = [], outbound = [], checks = [];
-let context;
+let context,base,close;
 try {
-  context = await chromium.launchPersistentContext(profile, {
-    executablePath: process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),
-    headless: true, ignoreDefaultArgs: ['--disable-extensions'], viewport: {width: 1280, height: 1000},
-    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
-  });
+  ({context, base, close}=await launchExtension({extension,profilePrefix:'otherwise-sounds-',viewport: {width: 1280, height: 1000}}));
   context.on('request', request => {if (/^https?:/.test(request.url())) outbound.push(request.url());});
   await context.addInitScript(() => {
     window.soundCalls = []; window.soundPlaying = []; window.soundMedia = [];
@@ -28,8 +22,7 @@ try {
       return original.call(this);
     };
   });
-  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
-  const base = worker.url().replace('background.js', '');
+
   const open = async (view, {preview = true, surface = 'dashboard'} = {}) => {
     const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${base}${surface}.html?${preview ? 'preview=1&' : ''}view=${view}`); await page.bringToFront();
@@ -186,7 +179,7 @@ try {
   if (await side.locator('[data-disclosure="settings-sound"]').getAttribute('open') === null) await side.locator('[data-disclosure="settings-sound"] > summary').click();
   await side.setViewportSize({width: 390, height: 850});
   await side.locator('#settings-language').selectOption('zh-CN');
-  assert.equal(await side.evaluate(() => document.documentElement.scrollWidth), 390, 'Sound settings fit a narrow side panel');
+  assert.ok(await side.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'Sound settings fit a narrow side panel');
   await mkdir(output, {recursive: true});
   await side.screenshot({path: resolve(output, 'settings-mobile.png'), fullPage: true});
   checks.push('Chinese sound controls and previews fit a 390px side panel without horizontal overflow');
@@ -196,5 +189,5 @@ try {
   await writeFile(resolve(output, 'results.json'), JSON.stringify({checks, errors, outbound}, null, 2));
   console.log(JSON.stringify({checks, errors, outbound}, null, 2));
 } finally {
-  await context?.close(); await rm(profile, {recursive: true, force: true});
+  await close?.();
 }

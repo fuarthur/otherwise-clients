@@ -1,7 +1,8 @@
 import {summarizeStats} from '../core/stats.js';
 import {icon} from './icons.js';
 import {openDialog,closeDialog} from './dialog-motion.js';
-const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+import {escapeHtml as escape} from './html.js';
+import {summarizeInterests} from './interest-overview.js';
 const copy={
  title:['Your progress','探索足迹'],overview:['Overview','总览'],activity:['Activity','活动'],achievements:['Achievements','成就'],
  topics:['Topics explored','已探索主题'],growth:['Exploration growth','探索版图增长'],newTopics:['New topics','新探索主题'],since:['Since','起点'],
@@ -12,14 +13,19 @@ const copy={
  none:['Your discoveries will appear here.','你的探索将出现在这里。'],info:['How these numbers work','统计说明'],close:['Close','关闭'],
  range7:['7 days','7 天'],range30:['30 days','30 天'],period:['Activity period','活动周期'],today:['Today','今天'],
  earned:['Milestone unlocked','成就解锁'],all:['View milestones','查看里程碑'],
+ fields:['Fields','领域'],topFields:['Top interest fields','兴趣最多的领域'],savedInterests:['Saved interests','已保存兴趣'],
+ fieldShare:['Share of all saved interests','占全部兴趣的比例'],unclassified:['Unclassified','未分类'],noFields:['No classified interests yet.','还没有已分类的兴趣。'],
+ fieldsLoading:['Loading fields…','正在加载领域…'],fieldsFailed:['Fields could not load.','无法加载领域。'],retryFields:['Retry fields','重新加载领域'],
+ fieldsExplanation:['Fields count your currently saved interests, using each topic’s own catalog field. Percentages use all saved interests, including unclassified topics. Custom topics with a known field count in that field; other topics are unclassified. Top fields show up to three nonempty catalog fields. Selecting a field opens the Galaxy with that field highlighted; custom topics remain in View options.',
+ '领域按当前已保存兴趣及各词条自带的大分类统计；百分比的分母包含全部兴趣，包括未分类词条。自定义词条有有效领域就计入对应领域，其余归入未分类。Top3 最多显示三个非空领域。点击领域可在星图中高亮该领域；自定义词条仍在「视图选项」列表中。'],
  explanation:[
  'An exploration means a Google or YouTube topic search opened through OtherWise. Each topic counts once per day; the daily average includes zero-activity days across the selected 7 or 30 days. A revisit can maintain your streak. Growth compares first-time topics since tracking began with the saved interests at that starting point; it does not measure expertise or semantic distance. Previously explored and imported-only topics are excluded from growth. With no starting interests, only a count is shown.',
  '探索指通过 OtherWise 成功打开主题的 Google 或 YouTube 搜索。同一主题每天只计一次；日均值按所选 7 或 30 天计算，包含没有探索的日期。重访旧主题也能延续连续纪录。版图增长是开始统计后的首次探索主题数，相对于起点已保存兴趣数的增长，不代表知识水平或语义距离。以前探索过的主题与仅由备份导入的主题不计入增长。起点没有兴趣时只显示数量。'],
  timezone:['Calendar timezone','统计时区'],baseline:['Starting interests','起点兴趣'],detail:['new topics / starting interests','新主题 / 起点兴趣'],
 };
 export function statsText(language,key){return copy[key]?.[language==='zh-CN'?1:0]??key;}
-const tabs=['overview','activity','achievements'];
-export function createStatsUI({getState,getLanguage,onChange,onExplore}) {
+const tabs=['overview','activity','achievements','fields'];
+export function createStatsUI({getState,getLanguage,getDomainCatalog=()=>({names:[]}),onChange,onExplore,onOpenField,onRetryFields}) {
  const params=new URLSearchParams(location.search);
  let tab=tabs.includes(params.get('stats'))?params.get('stats'):'overview',period=7,selectedDay=null;
  const t=key=>statsText(getLanguage(),key),e=key=>escape(t(key));
@@ -27,10 +33,18 @@ export function createStatsUI({getState,getLanguage,onChange,onExplore}) {
  const date=(value,options={month:'short',day:'numeric'})=>new Intl.DateTimeFormat(getLanguage(),{...options,timeZone:'UTC'}).format(new Date(typeof value==='string'?`${value}T12:00:00Z`:value));
  const milestoneLabel=row=>`${row.target} ${row.track==='streak'?t('days'):row.target===1 && getLanguage()!=='zh-CN'?'topic':t('topicUnit')}`;
  function progress(row){return `<progress max="${row.target}" value="${Math.min(row.value,row.target)}" aria-label="${escape(milestoneLabel(row))}"></progress>`;}
- function overview(s){
+ const interestSummary=()=>{const {names}=getDomainCatalog();return names?summarizeInterests(getState(),{domainNames:names}):null;};
+ const share=(count,total)=>total?count/total*100:0;
+ const percent=(count,total)=>new Intl.NumberFormat(getLanguage(),{style:'percent',maximumFractionDigits:1}).format(share(count,total)/100);
+ function fieldRow(row,summary,bars=false){return `<li><button type="button" class="stats-field-row" data-stats-field="${escape(row.name)}" data-focus="stats-field-${escape(row.name)}"><span class="stats-field-name">${escape(row.name)}</span><span class="stats-field-metrics"><b data-stats-field-count>${number(row.count)}</b><span data-stats-field-share>${percent(row.count,summary.savedCount)}</span>${icon('chevron')}</span>${bars?`<span class="stats-field-bar" aria-hidden="true"><i style="width:${share(row.count,summary.savedCount)}%"></i></span>`:''}</button></li>`;}
+ function fieldsStatus(){return `<p class="stats-empty" role="status">${e(getDomainCatalog().failed?'fieldsFailed':'fieldsLoading')}</p>${getDomainCatalog().failed?`<button type="button" data-stats-retry-fields data-focus="stats-retry-fields">${e('retryFields')}</button>`:''}`;}
+ function topFields(summary){return `<section class="stats-top-fields" aria-labelledby="stats-top-fields-title"><h2 id="stats-top-fields-title">${e('topFields')}</h2>${summary?`${summary.domainCount?`<ul class="stats-field-list">${summary.domains.filter(row=>row.count>0).slice(0,3).map(row=>fieldRow(row,summary)).join('')}</ul><p class="stats-field-caption">${e('fieldShare')}</p>`:`<p class="stats-empty">${e('noFields')}</p>`}`:fieldsStatus()}</section>`;}
+ function fields(summary){return summary?`<div class="stats-fields-heading"><h2>${e('savedInterests')}</h2><strong>${number(summary.savedCount)}</strong><p class="stats-field-caption">${e('fieldShare')}</p></div><ul class="stats-field-list stats-field-distribution">${summary.domains.map(row=>fieldRow(row,summary,true)).join('')}</ul>${summary.unclassifiedCount?`<div class="stats-unclassified" data-stats-unclassified><span>${e('unclassified')}</span><span class="stats-field-metrics"><b>${number(summary.unclassifiedCount)}</b> <span>${percent(summary.unclassifiedCount,summary.savedCount)}</span></span></div>`:''}`:fieldsStatus();}
+ function overview(s,summary){
   const week=s.calendar.slice(-7),next=s.milestones.find(row=>!row.unlocked);
   return `<div class="stats-overview"><div class="stats-hero"><span class="stats-eyebrow">${e('topics')}</span><strong class="stats-total" data-stats-total>${number(s.total)}</strong><div class="stats-growth"><strong>${s.growth.percent===null?number(s.growth.count):`+${number(s.growth.percent)}%`}</strong><span>${e(s.growth.percent===null?'newTopics':'growth')}</span></div>${s.growth.startedAt!==null?`<span class="stats-date">${e('since')} ${new Intl.DateTimeFormat(getLanguage(),{year:'numeric',month:'short',day:'numeric',timeZone:s.timeZone}).format(s.growth.startedAt)}</span>`:''}</div>
   <div class="stats-habit"><div class="stats-streak-number"><span aria-hidden="true">✦</span><strong>${number(s.streak)}</strong><span>${e('streak')}</span></div><div class="stats-week">${week.map(day=>`<span class="stats-week-day${day.count?' is-active':''}${day.today?' is-today':''}" aria-label="${escape(`${date(day.date)} · ${day.count} ${t('topics')}`)}"><span>${date(day.date,{weekday:'narrow'})}</span><b aria-hidden="true">${day.count?'✓':'·'}</b></span>`).join('')}</div></div>
+  ${topFields(summary)}
   <div class="stats-next"><div><span>${e(next?'next':'complete')}</span><strong>${next?escape(milestoneLabel(next)):'✦'}</strong></div>${next?progress(next):''}</div>
   ${!s.total?`<p class="stats-empty">${e(getState()?.approved?.length?'empty':'setup')}</p>`:''}<button type="button" class="primary stats-explore" data-stats-explore data-focus="stats-explore">${e(s.total?'explore':'start')}${icon('arrow')}</button></div>`;
  }
@@ -52,17 +66,19 @@ export function createStatsUI({getState,getLanguage,onChange,onExplore}) {
   document.body.append(node);node.addEventListener('close',()=>node.remove(),{once:true});openDialog(node);
  }
  return {
-  view(){const s=summarizeStats(getState(),{period});return `<section class="stats-page"><div class="stats-heading"><h1>${e('title')}</h1><button type="button" class="stats-info quiet" data-stats-info data-focus="stats-info" aria-label="${e('info')}">ⓘ</button></div><div class="stats-tabs" role="tablist" aria-label="${e('title')}">${tabs.map(id=>`<button type="button" role="tab" id="stats-tab-${id}" aria-selected="${tab===id}" tabindex="${tab===id?0:-1}" aria-controls="stats-panel" data-stats-tab="${id}" data-focus="stats-tab-${id}">${e(id)}</button>`).join('')}</div><div id="stats-panel" data-focus="stats-panel" role="tabpanel" tabindex="0" aria-labelledby="stats-tab-${tab}">${tab==='overview'?overview(s):tab==='activity'?activity(s):achievements(s)}</div></section>`;},
+  view(){const s=summarizeStats(getState(),{period}),summary=tab==='overview'||tab==='fields'?interestSummary():null;return `<section class="stats-page"><div class="stats-heading"><h1>${e('title')}</h1><button type="button" class="stats-info quiet" data-stats-info data-focus="stats-info" aria-label="${e('info')}">${icon('info')}</button></div><div class="stats-tabs" role="tablist" aria-label="${e('title')}">${tabs.map(id=>`<button type="button" role="tab" id="stats-tab-${id}" aria-selected="${tab===id}" tabindex="${tab===id?0:-1}" aria-controls="stats-panel" data-stats-tab="${id}" data-focus="stats-tab-${id}">${e(id)}</button>`).join('')}</div><div id="stats-panel" data-focus="stats-panel" role="tabpanel" tabindex="0" aria-labelledby="stats-tab-${tab}">${tab==='overview'?overview(s,summary):tab==='activity'?activity(s):tab==='fields'?fields(summary):achievements(s)}</div></section>`;},
   bind(root){
    const select=id=>{tab=id;const url=new URL(location.href);url.searchParams.set('stats',tab);history.replaceState(null,'',url);onChange();root.querySelector(`#stats-tab-${tab}`)?.focus({preventScroll:true});};
    root.querySelectorAll('[data-stats-tab]').forEach(button=>{
     button.addEventListener('click',()=>select(button.dataset.statsTab));
-    button.addEventListener('keydown',event=>{let i=tabs.indexOf(tab);if(event.key==='ArrowRight')i=(i+1)%3;else if(event.key==='ArrowLeft')i=(i+2)%3;else if(event.key==='Home')i=0;else if(event.key==='End')i=2;else return;event.preventDefault();select(tabs[i]);});
+    button.addEventListener('keydown',event=>{let i=tabs.indexOf(tab);if(event.key==='ArrowRight')i=(i+1)%tabs.length;else if(event.key==='ArrowLeft')i=(i+tabs.length-1)%tabs.length;else if(event.key==='Home')i=0;else if(event.key==='End')i=tabs.length-1;else return;event.preventDefault();select(tabs[i]);});
    });
    root.querySelectorAll('[data-stats-period]').forEach(button=>button.addEventListener('click',()=>{period=Number(button.dataset.statsPeriod);onChange();}));
    root.querySelector('[data-stats-explore]')?.addEventListener('click',onExplore);
+   root.querySelectorAll('[data-stats-field]').forEach(button=>button.addEventListener('click',()=>onOpenField?.(button.dataset.statsField)));
+   root.querySelector('[data-stats-retry-fields]')?.addEventListener('click',onRetryFields);
    root.querySelector('[data-stats-info]')?.addEventListener('click',()=>{
-    const s=summarizeStats(getState(),{period});dialog(t('info'),`<p>${e('explanation')}</p><p>${e('timezone')}: ${escape(s.timeZone)}</p>${s.growth.startedAt!==null?`<p>${number(s.growth.count)} / ${number(s.growth.baseline)} · ${e('detail')}</p>`:''}`);
+    const s=summarizeStats(getState(),{period});dialog(t('info'),`<p>${e('explanation')}</p><p>${e('fieldsExplanation')}</p><p>${e('timezone')}: ${escape(s.timeZone)}</p>${s.growth.startedAt!==null?`<p>${number(s.growth.count)} / ${number(s.growth.baseline)} · ${e('detail')}</p>`:''}`);
    });
    root.querySelectorAll('[data-stats-day]').forEach(button=>{
     const show=()=>{selectedDay=button.dataset.statsDay;root.querySelector('.stats-calendar-detail').textContent=`${date(button.dataset.statsDay)} · ${button.dataset.count} ${t('topics')}`;};

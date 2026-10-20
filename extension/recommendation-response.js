@@ -1,5 +1,18 @@
 import {cleanDiscoveryMetadata} from './core/discovery.js';
 export class RecommendationResponseError extends Error {}
+
+/** Decode the shared service envelope; each caller owns HTTP errors and cancellation. */
+export async function readRecommendationResponse(response,{specific=false,seed}={}) {
+  const raw=await response.text();
+  if(raw.length>150000)throw new RecommendationResponseError('The service response was too large.');
+  const result=JSON.parse(raw),items=cleanRecommendations(result.recommendations,specific);
+  if(specific && (result.seed!==seed || !/^[a-f0-9]{64}$/.test(result.graph_sha256 || '') ||
+      new Set(items.map(row=>row.discovery.concept_id)).size!==items.length)) {
+    throw new RecommendationResponseError('The service returned an invalid graph concept.');
+  }
+  return {items,graphSha256:result.graph_sha256};
+}
+
 export function cleanRecommendations(value, specific = false) {
   if(!Array.isArray(value) || value.length>100) throw new RecommendationResponseError('The service returned an invalid recommendation list.');
   return value.map(row=>{

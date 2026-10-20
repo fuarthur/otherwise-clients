@@ -29,7 +29,7 @@ export function placeGalaxyLabels(candidates, viewport, measure, exclusions = []
     while (measure(text, candidate.kind) > maxWidth && text.length > 3) text = text.slice(0, -2);
     if (text !== candidate.text) text = text.slice(0, -1) + '…';
     const textWidth = measure(text, candidate.kind);
-    for (const [dx, dy] of [[9,-12],[9,22],[-textWidth-9,-12],[-textWidth-9,22],[9,-33],[9,43]]) {
+    for (const [dx, dy] of candidate.offsets ?? [[9,-12],[9,22],[-textWidth-9,-12],[-textWidth-9,22],[9,-33],[9,43]]) {
       const x = Math.max(9, Math.min(width - textWidth - 9, candidate.x + dx)), y = candidate.y + dy;
       const box = {x:x-3, y:y-12, width:textWidth+6, height:17};
       if (box.y < 8 || box.y+box.height > height-8 || boxes.some(b => intersects(box,b))) continue;

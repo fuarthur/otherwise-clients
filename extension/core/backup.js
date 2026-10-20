@@ -3,9 +3,11 @@ import {createState, reduceState, sanitizeTopic, isAllowedUrl} from './index.js'
 import {isConceptId, isAreaId, validRating} from './discovery.js';
 import {normalizeInterestGroups,normalizeGroupScope} from './interest-groups.js';
 import {DEFAULT_THEME,normalizeThemeId} from './themes.js';
+import {DEFAULT_TOUR_MUSIC_VOLUME,DEFAULT_TOUR_MUSIC_MODE} from './galaxy-tour-music.js';
 
 export const MAX_BACKUP_BYTES = 5 * 1024 * 1024;
-const preferenceKeys = ['language','theme','mode','globalLevel','recommendationView','galaxyExplorationMode','galaxyLayoutOptions','galaxyShowDomainLabels','galaxyShowInterestLabels','recommendationOptions','recommendationKind','discoveryExploration','soundEffectsEnabled','soundEffectsVolume','blockedDomains'];
+const preferenceKeys = ['language','theme','mode','globalLevel','recommendationView','galaxyExplorationMode','galaxyLayoutOptions','galaxyShowDomainLabels','galaxyShowInterestLabels','recommendationOptions','recommendationKind','discoveryExploration','soundEffectsEnabled','soundEffectsVolume','galaxyTourMusic','galaxyTourMusicVolume','galaxyTourMusicMode','blockedDomains','statsFollowSystemTimeZone','statsTimeZone'];
+const optionalPreferences = ['galaxyTourMusic','galaxyTourMusicVolume','galaxyTourMusicMode','theme','statsFollowSystemTimeZone','statsTimeZone'];
 const invalid = () => { throw new Error('This is not a valid OtherWise backup.'); };
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const time = value => Number.isSafeInteger(value) && value >= 0;
@@ -34,8 +36,8 @@ function topic(value, history = false) {
 }
 function preferences(value) {
   keys(value, preferenceKeys);
-  if (preferenceKeys.some(key => key !== 'theme' && !Object.hasOwn(value, key))) invalid();
-  const {globalLevel, ...patch} = {theme:DEFAULT_THEME,...value};
+  if (preferenceKeys.some(key => !optionalPreferences.includes(key) && !Object.hasOwn(value, key))) invalid();
+  const {globalLevel, ...patch} = {theme:DEFAULT_THEME,galaxyTourMusicVolume:DEFAULT_TOUR_MUSIC_VOLUME,galaxyTourMusicMode:DEFAULT_TOUR_MUSIC_MODE,statsFollowSystemTimeZone:true,statsTimeZone:createState().settings.statsTimeZone,...value};
   if (!Number.isInteger(globalLevel) || globalLevel < 0 || globalLevel > 8 ||
       !Array.isArray(patch.blockedDomains) || patch.blockedDomains.length > 500) invalid();
   const normalized = reduceState(createState(), {type:'SET_SETTINGS',patch});

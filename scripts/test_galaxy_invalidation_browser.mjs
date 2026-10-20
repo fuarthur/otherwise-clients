@@ -1,5 +1,5 @@
 // Real extension windows, temporary profile and a fictional loopback layout service.
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 import {createServer} from 'node:http';
 import {mkdtemp,cp,readFile,writeFile,rm} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
@@ -16,7 +16,7 @@ manifest.host_permissions=['http://127.0.0.1/*'];
 await writeFile(resolve(extension,'manifest.json'),JSON.stringify(manifest));
 const layout=JSON.parse(await readFile(resolve(extension,'galaxy-layout.json')));
 const {catalog_sha256,model,embedding}=layout.metadata;
-let ready=false,cacheKey='d'.repeat(64),parameters,context;
+let ready=false,cacheKey='d'.repeat(64),parameters,context,base,close;
 const requests=[],errors=[],checks=[];
 const server=createServer(async(request,response)=>{
  requests.push(request.method);
@@ -33,13 +33,7 @@ const server=createServer(async(request,response)=>{
 try{
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const endpoint=`http://127.0.0.1:${server.address().port}`;
- context=await chromium.launchPersistentContext(resolve(temporary,'profile'),{
-  executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),headless:true,
-  ignoreDefaultArgs:['--disable-extensions'],viewport:{width:1100,height:850},
-  args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],
- });
- const worker=context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
- const base=worker.url().replace('background.js','');
+ ({context, base, close}=await launchExtension({extension,profile:resolve(temporary,'profile'),viewport:{width:1100,height:850}}));
  const settings=await context.newPage();settings.on('pageerror',error=>errors.push(error.message));
  await settings.goto(base+'sidepanel.html?view=settings');await settings.locator('#settings-form').waitFor();
  await settings.evaluate(endpoint=>chrome.runtime.sendMessage({type:'ACTION',action:{type:'SET_SETTINGS',patch:{endpoint,tutorialSeen:true,tutorialActive:false}}}),endpoint);
@@ -71,6 +65,6 @@ try{
  }
  assert.deepEqual(errors,[]);console.log(JSON.stringify({passed:true,checks},null,2));
 }finally{
- await context?.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
+ await close?.();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
  await rm(temporary,{recursive:true,force:true});
 }

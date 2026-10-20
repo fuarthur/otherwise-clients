@@ -9,6 +9,10 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_FILES = {'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'package.json', '.gitignore'}
 ASSETS = {'catalog.json', 'galaxy-layout.json', 'interest-input.json'}
+MUSIC = {'extension/assets/music/starlit-drift.mp3', 'extension/assets/music/stellar-passage.mp3',
+         'extension/assets/music/distant-echoes.mp3'}
+BROWSER_HELPERS = {'browser-test-helpers.mjs', 'galaxy-tour-boundary-checks.mjs',
+                   'galaxy-tour-music-checks.mjs', 'galaxy-tour-scope-checks.mjs'}
 BROWSER_TEST = re.compile(r'test_[a-z_]+_browser\.mjs')
 
 
@@ -27,11 +31,12 @@ def validate_path(path):
     parent, suffix = parts[0], path.suffix
     permitted = (
         parent == 'extension' and (suffix in {'.js', '.html', '.css', '.wav', '.md'} or
-        str(path) in {'extension/manifest.json', 'extension/focus-preview.v1.json', 'extension/assets/sounds/provenance.json'}) or
+        str(path) in MUSIC or str(path) in {'extension/manifest.json', 'extension/focus-preview.v1.json', 'extension/assets/sounds/provenance.json'}) or
         parent in {'website', 'introduction-site'} and suffix in {'.html', '.css', '.js', '.png', '.svg'} or
         parent == 'client-assets' and len(parts) == 2 and path.name in ASSETS or
         parent == 'scripts' and len(parts) == 2 and
-        (path.name in {'build_extension.py', 'public_boundary.py'} or BROWSER_TEST.fullmatch(path.name)) or
+        (path.name in {'build_extension.py', 'public_boundary.py'} | BROWSER_HELPERS or BROWSER_TEST.fullmatch(path.name)) or
+        str(path) == 'scripts/fixtures/galaxy-tour-page.js' or
         parent == 'tests' and len(parts) == 2 and path.name == 'test_public_package.py' or
         parent == 'docs' and len(parts) == 2 and path.name in {'web.md', 'development.md'} or
         str(path) == '.github/workflows/checks.yml'

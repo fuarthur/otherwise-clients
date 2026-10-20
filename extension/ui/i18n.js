@@ -1,5 +1,6 @@
 // UI copy only. Topic names, knowledge domains, descriptions and user drafts stay literal.
 const copy = {
+  draftUpdated: ['Draft updated. Nothing saved yet.', '草稿已更新，尚未保存为兴趣。'],
   stats: ['Stats', '统计'],
   proactiveTitle: ['Recommendations on search pages', '搜索页主动推荐'],
   proactiveHelp: ['Show up to 3 OtherWise ideas below Google and YouTube search areas, alongside the original results. Uses all saved interests, never your current search terms. Updates on a later visit after 30 minutes. Closing hides it in that tab until the tab closes. Requires site access and a connected service.', '在 Google 和 YouTube 搜索区域下方显示最多 3 个 OtherWise 推荐，保留原有内容。仅使用全部已保存兴趣，不使用当前搜索词。30 分钟后再次搜索时更新。关闭推荐栏后，该标签页关闭前不再显示。需要网站访问权限及可用的推荐服务。'],
@@ -54,7 +55,7 @@ const copy = {
   overviewOpenMap: ['See your interests on the map', '在星图中查看兴趣'], closeInterestOverview: ['Close interest overview', '关闭兴趣概览'],
   soundEffects: ['Sound effects', '音效'],
   soundEffectsEnabled: ['Enable sound effects', '开启音效'],
-  soundEffectsHelp: ['Sounds when exploring topics or saving interests. Off by default.', '探索主题或保存兴趣时播放音效，默认关闭。'],
+  soundEffectsHelp: ['Sounds when exploring, arriving at topics during a tour, or saving interests. Off by default.', '探索主题、漫游到达主题或保存兴趣时播放音效，默认关闭。'],
   soundEffectsVolume: ['Volume', '音量'], soundEffectsPreview: ['Preview sound effects', '试听音效'],
   soundPreview_save: ['Preview Save', '试听保存'], soundPreview_explore: ['Preview Explore', '试听探索'], soundPreview_bloom: ['Preview Bloom', '试听星域展开'],
   soundPreviewHelp: ['Preview sounds even while automatic sounds are off. Changes save automatically.', '关闭自动音效时也可以试听，设置会自动保存。'],
@@ -72,7 +73,7 @@ const copy = {
   browse: ['Browse', '浏览'], singleView: ['One at a time', '一次一个'],
   layoutChanged: ['View changed.', '显示方式已切换。'],
   discoverSubtitle: ['A new direction, at your pace.', '按自己的节奏，发现新的方向。'],
-  interestSections: ['Interest lists', '兴趣列表'], savedTab: ['Saved', '已保存'], reviewTab: ['To review', '待确认'],
+  interestSections: ['Interest lists', '兴趣列表'], savedTab: ['Saved', '已保存'], reviewTab: ['Interest draft', '兴趣草稿'],
   reviewTopics: ['Topics to review', '待确认的主题'], reviewBrowsingShort: ['Review browsing', '查看浏览记录'], cancelHistoryReview: ['Cancel', '取消'],
   reviewEmpty: ['Nothing to review yet', '暂时没有待确认的主题'], reviewEmptyHelp: ['Review recent browsing to find subjects you might want to save.', '查看近期浏览记录，挑选你想保存为兴趣的主题。'], selectedReviewCount: ['{count} selected', '已选 {count} 个'],
   myInterests: ['My interests', '我的兴趣'], savedInterests: ['Saved interests', '已保存的兴趣'],
@@ -167,10 +168,15 @@ const copy = {
   option_max_overlap_fraction: ['Familiar-topic share cap', '熟悉主题比例上限'], optionHelp_max_overlap_fraction: ['0–0.95, default 0.20 (20%). Caps the share of returned topics inside the interest boundary.', '0–0.95，默认 0.20（20%）。限制返回主题中位于兴趣边界以内的比例。'],
   option_randomness: ['Ranking variation', '排序变化幅度'], optionHelp_randomness: ['0–1, default 0.03. Adds variation to ranking on each request; it does not widen the allowed range.', '0–1，默认 0.03。为每次请求的排序添加变化，不会扩大允许的推荐范围。'],
   serviceConnection: ['Service connection', '服务连接'], serviceHelp: ['For the shared demo, use the address and team access code provided by your host.', '共享演示请使用组织者提供的服务地址和团队访问码。'], serviceAddress: ['Service address', '服务地址'], endpointHelp: ['Use an HTTPS address, or the local service on this computer.', '使用 HTTPS 地址，或此电脑上的本地服务地址。'],
-  connectLocal: ['Connect local service', '连接本机服务'], localServiceHelp: ['Run Start-OtherWise-Local.command, then connect below. Local mode needs no access code, and the connection stays saved after restarting the server.', '先运行 Start-OtherWise-Local.command，再点击下方按钮连接。本机模式无需访问码，重启服务器后也无需重新设置。'], localServiceSaved: ['Local service selected. No access code is needed in local mode.', '已选择本机服务。本机模式无需访问码。'],
-  teamCode: ['Team access code', '团队访问码'], codePlaceholder: ['Shared demo only', '共享演示时填写'], codeHelp: ['Leave empty for local mode. Shared demo codes stay on this device and are sent only to the configured service.', '本机模式留空。共享演示的访问码保存在此设备，仅发送给你配置的服务。'],
+  connectLocal: ['Connect local service', '连接本机服务'], localServiceHelp: ['Run Start-OtherWise-Local.command or Start-OtherWise-Demo.command, then connect below. Direct local connections need no access code and stay saved after restarting the server.', '先运行 Start-OtherWise-Local.command 或 Start-OtherWise-Demo.command，再点击下方按钮连接。本机直连无需访问码，重启服务器后也无需重新设置。'], localServiceSaved: ['Local service selected. Direct local connections need no access code.', '已选择本机服务。本机直连无需访问码。'],
+  teamCode: ['Team access code', '团队访问码'], codePlaceholder: ['Shared demo only', '共享演示时填写'], codeHelp: ['Leave empty for a direct local connection. Shared HTTPS connections require an access code, stored on this device and sent only to the configured service.', '本机直连留空。共享 HTTPS 连接需要访问码；访问码保存在此设备，仅发送给你配置的服务。'],
   excludedWebsites: ['Excluded websites', '排除的网站'], excludedHelp: ['Visits to these domains are skipped. Include a domain such as mail.example.com, one per line. Subdomains are included.', '跳过这些域名的浏览记录。每行填写一个域名，例如 mail.example.com。其子域名也会一并排除。'], domainsToSkip: ['Domains to skip', '要排除的域名'], domainsHelp: ['Exclusions help reduce sensitive data collection, but cannot identify every sensitive topic.', '排除网站有助于减少敏感数据收集，但无法识别所有敏感主题。'],
   saveSettings: ['Save settings', '保存设置'], unsaved: ['You have unsaved changes.', '有尚未保存的修改。'], settingsSaved: ['Settings saved.', '设置已保存。'],
+  statsTimezoneSettings: ['Stats timezone', '统计时区'], statsFollowSystemTimeZone: ['Follow system timezone', '根据系统时区自动调整'],
+  statsTimezoneHelp: ['Changes apply immediately and regroup historical activity and streaks. Topic totals and growth stay the same.', '修改后立即生效，历史活动和连续天数会按生效时区重算。探索总数和增长起点保持不变。'],
+  statsEffectiveTimeZone: ['Current timezone', '当前生效时区'], statsManualTimeZone: ['Manual timezone', '手动设置时区'],
+  statsTimezoneSearch: ['Search city or timezone', '搜索城市或时区'], statsTimezoneSearchHint: ['For example: Shanghai, Chicago, UTC', '例如：Shanghai、Chicago、UTC'],
+  statsTimezoneChoose: ['Choose a timezone', '请选择时区'], statsTimezoneNoMatches: ['No matching timezones', '没有匹配的时区'], statsTimezoneSaved: ['Stats timezone saved.', '统计时区已保存。'],
   localData: ['Your local data', '你的本地数据'], localDataHelp: ['Clear browsing-derived topics while keeping the interests you saved and the paths you explored, or start over completely.', '清除从浏览记录中发现的主题，保留已保存的兴趣和探索路径；也可以完全重新开始。'], clearBrowsing: ['Clear browsing data', '清除浏览数据'], reset: ['Reset OtherWise', '重置 OtherWise'],
   privacy: ['Raw visit titles and addresses stay local. Discover sends saved interest names and discovery preferences; specific discovery also sends explicitly saved concept feedback and area recommendation counts. Focus sends only the chosen catalog ID, public data version and recommendation settings after you press Get ideas; the service and tunnel also receive network information. No account-wide YouTube history is imported.', '原始浏览标题和地址保留在本地。「发现」会发送已保存的兴趣名称和探索偏好；具体概念推荐还会发送明确保存的反馈和领域推荐次数。「聚焦探索」仅在点击获取推荐后发送所选目录 ID、公开数据版本及推荐参数；服务和网络隧道也会接收网络信息。不会导入整个 YouTube 账号的观看记录。'],
   mapEyebrow: ['Your curiosity, connected', '让好奇心相连'], mapHeading: ['A world taking shape.', '你的世界逐渐成形。'], mapIntro: ['Saved interests give you a starting point. Subjects you search through OtherWise show where you’ve ventured.', '已保存的兴趣是你的起点。通过 OtherWise 搜索的主题会留下探索足迹。'],
@@ -195,6 +201,7 @@ export function translate(language, key, values = {}) {
 
 // Exact known application messages only; unknown text remains literal.
 export const errorTranslations = Object.freeze({
+  'Choose a valid timezone.': '请选择有效的时区。',
   'Enter a group name of 1–80 characters without line breaks.': '请输入 1–80 个字符的分组名称，不要换行。',
   'A group with that name already exists.': '已经有同名分组，请换一个名称。',
   'Choose saved interests for this group.': '请选择已保存的兴趣加入分组。',

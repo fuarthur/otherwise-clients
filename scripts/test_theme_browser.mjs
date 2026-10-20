@@ -1,17 +1,15 @@
 // Real extension storage in a disposable profile; visual examples use offline preview data.
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
+import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {tmpdir} from 'node:os';
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output=resolve(root,'.cache/qa/themes/browser');
 await mkdir(output,{recursive:true});
-const profile=await mkdtemp(resolve(tmpdir(),'otherwise-themes-'));
 const extension=resolve(root,'dist/otherwise-extension');
 const checks=[],errors=[];
-let context,page,failure;
+let context,base,close,page,failure;
 async function readable(tab,selector){
   const pair=await tab.locator(selector).first().evaluate(node=>{
     const ink=getComputedStyle(node).color;
@@ -33,14 +31,8 @@ async function until(predicate,message){
   throw new Error(message || 'Theme state did not settle.');
 }
 try{
-  context=await chromium.launchPersistentContext(profile,{
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),
-    headless:true,ignoreDefaultArgs:['--disable-extensions'],viewport:{width:390,height:850},reducedMotion:'reduce',
-    args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],
-  });
+  ({context, base, close}=await launchExtension({extension,profilePrefix:'otherwise-themes-',viewport:{width:390,height:850},reducedMotion:'reduce'}));
   context.on('page',tab=>tab.on('pageerror',error=>errors.push(error.message)));
-  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
-  const base=worker.url().replace('background.js','');
   page=await context.newPage();await page.goto(`${base}sidepanel.html?view=settings`);
   await page.locator('#settings-theme').waitFor({timeout:3000});
   const state=()=>page.evaluate(async()=>(await chrome.storage.local.get('state')).state);
@@ -152,7 +144,7 @@ try{
     for(const selector of ['.focus-title','.focus-disclosure','.focus-description','.focus-domain','.focus-detail-distance','.focus-map-controls button','[data-focus-action="get-ideas"]'])await readable(preview,selector);
     for(const width of [320,1280]){
       await preview.setViewportSize({width,height:850});
-      assert.equal(await preview.evaluate(()=>document.documentElement.scrollWidth),width);
+      assert.ok(await preview.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
       await preview.screenshot({path:resolve(output,`${theme}-en-focus-${width}.png`)});
     }
   }
@@ -170,9 +162,9 @@ try{
         }
         const colors=await preview.evaluate(()=>{
           const body=getComputedStyle(document.body);
-          return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,background:body.backgroundColor,ink:body.color};
+          return {width:innerWidth,scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,background:body.backgroundColor,ink:body.color};
         });
-        assert.equal(colors.scrollWidth,width,`${theme}/${language}/${view} fits ${width}px`);
+        assert.ok(colors.scrollWidth<=colors.clientWidth,`${theme}/${language}/${view} fits ${width}px`);
         if(theme==='light')assert.equal(colors.background,'rgb(245, 246, 242)','Every page uses the light palette');
         if(width===1280 && view==='discover'){
           for(const selector of ['#selected-topic-title','.topic-description','.topic-detail .eyebrow','.topic-search > summary','.topic-row-domain'])await readable(preview,selector);
@@ -190,7 +182,7 @@ try{
 }catch(error){failure=error;if(page)await page.screenshot({path:resolve(output,'failure.png'),fullPage:true}).catch(()=>{});}
 finally{
   await writeFile(resolve(output,'results.json'),JSON.stringify({checks,errors,failure:failure?.stack},null,2));
-  await context?.close();await rm(profile,{recursive:true,force:true});
+  await close?.();
 }
 if(failure)throw failure;
 console.log(JSON.stringify({checks,errors},null,2));

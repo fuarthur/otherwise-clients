@@ -1,10 +1,9 @@
 // Deterministic packaged-extension checks in a disposable profile; no personal browsing data.
 import assert from 'node:assert/strict';
-import {mkdtemp,cp,readFile,writeFile,mkdir} from 'node:fs/promises';
+import {mkdtemp,cp,readFile,writeFile,mkdir,rm} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {createServer} from 'node:http';
-import {tmpdir} from 'node:os';
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE||'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 const root=resolve(import.meta.dirname,'..');
 const qa=resolve(root,'.cache/qa/proactive');await mkdir(qa,{recursive:true});
 const live=process.env.OTHERWISE_PROACTIVE_LIVE==='1';
@@ -19,22 +18,20 @@ const api=createServer(async(req,res)=>{
 });
 await new Promise(r=>api.listen(0,'127.0.0.1',r));
 const endpoint=`http://127.0.0.1:${api.address().port}`;
-let context;
+let context,base,close,dir;
 const until=async fn=>{for(let n=0;n<80;n++){if(await fn())return;await new Promise(r=>setTimeout(r,100));}throw new Error('Browser condition timed out');};
 const fixture=provider=>`<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;font:16px Arial;background:#fff;color:#202124}#searchform,ytd-masthead{display:block;padding:25px 8%;border-bottom:1px solid #eee}input{padding:12px;width:65%;border:1px solid #ddd;border-radius:24px}#appbar{padding:16px 8%}main,#primary{display:block;margin:0 8%;max-width:1000px}.native{padding:24px 0;border-bottom:1px solid #eee}a{color:#2049a5}ytd-search{display:block}#auto{position:absolute;z-index:999;background:white;box-shadow:0 3px 9px #999;padding:20px;left:8%;top:74px}</style></head><body>${provider==='google'?'<div id="searchform"><form role="search"><input aria-label="Search" value="gardening"></form></div><div id="appbar">All　Videos　Images　News</div><main id="main">':'<ytd-masthead><form role="search"><input aria-label="Search" value="gardening"></form></ytd-masthead><ytd-search><div id="header">All　Videos　Unwatched</div><div id="primary">'}<article class="native" data-native="one"><a href="#native-one">Original result one</a><p>Native search results stay in place.</p></article><article class="native" data-native="two"><a href="#native-two">Original recommended content</a><p>Original recommendations remain available.</p></article>${provider==='google'?'</main>':'</div></ytd-search>'}</body></html>`;
 try{
- const dir=await mkdtemp(resolve(tmpdir(),'otherwise-proactive-extension-'));
+ dir=await mkdtemp('/private/tmp/otherwise-proactive-extension-');
  await cp(resolve(root,'dist/otherwise-extension'),dir,{recursive:true});
  const manifest=JSON.parse(await readFile(resolve(dir,'manifest.json')));
  // Fixture grants avoid interacting with the user's permissions. Denial/revocation are also covered by runtime unit tests.
  manifest.host_permissions=['http://127.0.0.1/*','https://www.google.com/*','https://www.youtube.com/*'];
  await writeFile(resolve(dir,'manifest.json'),JSON.stringify(manifest));
- const profile=await mkdtemp(resolve(tmpdir(),'otherwise-proactive-profile-'));
- context=await chromium.launchPersistentContext(profile,{headless:true,executablePath:process.env.OTHERWISE_CHROMIUM||chromium.executablePath(),ignoreDefaultArgs:['--disable-extensions'],viewport:{width:1280,height:900},args:[`--disable-extensions-except=${dir}`,`--load-extension=${dir}`]});
+  ({context, base, close}=await launchExtension({extension:dir,profilePrefix:'otherwise-proactive-profile-',viewport:{width:1280,height:900}}));
  if(!live)await context.route('https://www.google.com/**',r=>r.fulfill({contentType:'text/html',body:fixture('google')}));
  if(!live)await context.route('https://www.youtube.com/**',r=>r.fulfill({contentType:'text/html',body:fixture('youtube')}));
- const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
- const settings=await context.newPage();await settings.goto(worker.url().replace('background.js','sidepanel.html?view=settings'));
+ const settings=await context.newPage();await settings.goto(base+'sidepanel.html?view=settings');
  const send=message=>settings.evaluate(m=>chrome.runtime.sendMessage(m),message);
  const dispatch=action=>send({type:'ACTION',action});
  await dispatch({type:'SET_SETTINGS',patch:{tutorialSeen:true,tutorialActive:false,endpoint}});
@@ -112,4 +109,9 @@ try{
  assert.equal((await send({type:'GET_STATE'})).state.approved.length,1);
  console.log(JSON.stringify({result:'PASS',serviceRequests:calls,checks:['default off','enable existing tabs','3 cards','query exclusion','shared cache','native content retained','new tab exploration','SPA navigation','anchor replacement including pending response','keyboard close','dismissal across reload','320px layout','disable removes widget'],screenshots:qa}));
  }
-}finally{await context?.close();await new Promise(r=>api.close(r));}
+}finally{
+ try{await close?.();}finally{
+  if(dir)await rm(dir,{recursive:true,force:true});
+  await new Promise(r=>api.close(r));
+ }
+}

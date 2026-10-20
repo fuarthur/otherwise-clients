@@ -5,11 +5,10 @@ import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-const {chromium} = await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const output = resolve(root, '.cache/qa/getting-started');
 await mkdir(output, {recursive:true});
-const profile = await mkdtemp(resolve(tmpdir(), 'otherwise-guide-'));
 const fixture = await mkdtemp(resolve(tmpdir(), 'otherwise-guide-extension-'));
 const extension = resolve(fixture, 'extension');
 await cp(resolve(root, 'dist/otherwise-extension'), extension, {recursive:true});
@@ -33,16 +32,12 @@ const server = createServer(async (request, response) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const endpoint = `http://127.0.0.1:${server.address().port}`;
 const errors = [], checks = [];
-let context;
+let context,base,close;
 try {
-  context = await chromium.launchPersistentContext(profile, {
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),
-    headless:true, ignoreDefaultArgs:['--disable-extensions'], viewport:{width:390,height:850},
-    args:[`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
-  });
-  const worker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  ({context, base, close}=await launchExtension({extension,profilePrefix:'otherwise-guide-',viewport:{width:390,height:850}}));
+
   await context.route('https://www.google.com/**', route => route.fulfill({body:'Isolated search fixture.'}));
-  const base = worker.url().replace('background.js', 'sidepanel.html');
+  base+='sidepanel.html';
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
   const setLanguage = async (target, language) => {
@@ -53,7 +48,7 @@ try {
   };
   const screenshot = async (target, name) => {
     const width = target.viewportSize().width;
-    assert.equal(await target.evaluate(() => document.documentElement.scrollWidth), width, 'The guide must not introduce horizontal scrolling');
+    assert.ok(await target.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'The guide must not introduce horizontal scrolling');
     const bounds = await target.evaluate(() => {
       const main = document.querySelector('#main-view').getBoundingClientRect();
       const guide = document.querySelector('#welcome-guide').getBoundingClientRect();
@@ -172,8 +167,8 @@ try {
   await writeFile(resolve(output, 'results.json'), JSON.stringify({passed:true, checks}, null, 2));
   console.log(JSON.stringify({passed:true, checks, output}, null, 2));
 } finally {
-  await context?.close();
-  await rm(profile, {recursive:true, force:true});
+  await close?.();
+
   await rm(fixture, {recursive:true, force:true});
   await new Promise(resolve => server.close(resolve));
 }

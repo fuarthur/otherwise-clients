@@ -29,6 +29,21 @@ test('local import produces candidates without approving or transmitting them',a
   assert.equal(JSON.stringify(s).includes('example.org/garden'),false);
   assert.equal(JSON.stringify(s).includes('Gardening for beginners'),false);
 });
+test('a learned site signature remains background on individual visits, while a content mention wins',async()=>{
+  const historyItems=['trees','flowers','soil'].map((word,i)=>({url:`https://example.org/${i}`,title:`Botany ${word} | Gardening`,lastVisitTime:now}));
+  const r=rig({historyItems});
+  let state=await r.controller.importHistory(30);
+  assert.equal(state.candidates.find(row=>row.id==='Gardening').backgroundReason,'signature');
+  await r.controller.dispatch({type:'SET_SETTINGS',patch:{browsingEnabled:true}});
+  state=await r.controller.observe([{...historyItems[0],lastVisitTime:now+1}]);
+  assert.equal(state.candidates.find(row=>row.id==='Gardening').backgroundReason,'signature');
+  state=await r.controller.observe([{url:'https://example.org/new',title:'Botany seeds | Gardening',lastVisitTime:now+2}]);
+  assert.equal(state.candidates.find(row=>row.id==='Gardening').backgroundReason,'signature');
+  state=await r.controller.observe([{url:'https://example.org/content',title:'Gardening techniques | Gardening',lastVisitTime:now+3}]);
+  assert.equal(state.candidates.find(row=>row.id==='Gardening').contentCount,1);
+  assert.equal(state.candidates.find(row=>row.id==='Gardening').backgroundReason,null);
+  assert.equal(r.requests.length,0);
+});
 test('recommendation payload excludes unconfirmed observations and all source metadata',async()=>{
   const r=rig(); await r.controller.dispatch({type:'ADD_INTEREST',topic:catalog[0]});
   await r.controller.dispatch({type:'SET_SETTINGS',patch:{accessToken:'team-secret'}});
@@ -331,7 +346,6 @@ test('background observations carrying an old generation cannot survive pause an
 
 test('endpoint revocation invalidates a pending send even when automatic refresh was already disabled',async()=>{
   const waiting=deferred(), permission=deferred(); const r=rig({endpointPermission:async()=>{waiting.resolve();return permission.promise;}});
-  assert.equal(typeof r.controller.revokeEndpoint,'function');
   await r.controller.dispatch({type:'ADD_INTEREST',topic:catalog[0]});
   const before=await r.controller.dispatch({type:'SET_SETTINGS',patch:{accessToken:'team-secret'}});
   const pending=r.controller.recommend(); await waiting.promise;

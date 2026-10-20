@@ -1,30 +1,22 @@
 // Exercise the packaged UI with fictional state in a disposable browser profile.
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
+import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {tmpdir} from 'node:os';
-const {chromium}=await import(process.env.OTHERWISE_PLAYWRIGHT_MODULE || 'playwright');
+import {launchExtension} from './browser-test-helpers.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const output=resolve(root,'.cache/qa/telegram-ui/browser');
 await mkdir(output,{recursive:true});
-const profile=await mkdtemp(resolve(tmpdir(),'otherwise-telegram-ui-'));
 const extension=resolve(root,'dist/otherwise-extension');
 const checks=[],errors=[],measurements=[];
-let context,page,failure;
+let context,base,close,page,failure;
 const rect=async selector=>page.locator(selector).first().boundingBox();
 const inViewport=async selector=>{
   const box=await rect(selector), {height}=page.viewportSize();
   assert.ok(box && box.y>=0 && box.y+box.height<=height+1,`${selector} remains visible in ${height}px: ${JSON.stringify(box)}`);
 };
 try{
-  context=await chromium.launchPersistentContext(profile,{
-    executablePath:process.env.OTHERWISE_CHROMIUM || chromium.executablePath(),
-    headless:true,ignoreDefaultArgs:['--disable-extensions'],viewport:{width:320,height:600},
-    args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],
-  });
-  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
-  const base=worker.url().replace('background.js','');
+  ({context, base, close}=await launchExtension({extension,profilePrefix:'otherwise-telegram-ui-',viewport:{width:320,height:600}}));
   page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
   const open=async(surface,view,width,height)=>{
     await page.setViewportSize({width,height});
@@ -42,10 +34,10 @@ try{
       const {dispatch}=await import('./dev-preview.js');
       for(let i=1;i<=15;i++)await dispatch({type:'ADD_INTEREST',topic:`Saved topic ${i}`});
     });
-    const size=await page.evaluate(()=>({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,scrollHeight:document.documentElement.scrollHeight}));
+    const size=await page.evaluate(()=>({width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,scrollHeight:document.documentElement.scrollHeight}));
     measurements.push({surface,view,...size});
     await page.screenshot({path:resolve(output,`${surface}-${view}-${width}.png`)});
-    assert.equal(size.scrollWidth,width,'The page has no horizontal overflow');
+    assert.ok(size.scrollWidth<=size.clientWidth,'The page has no horizontal overflow');
     assert.ok(size.scrollHeight<=height+1,`The ${view} page fits ${width}×${height}; measured ${size.scrollHeight}`);
     if(surface==='sidepanel'){
       const navigation=await rect('.main-nav'),content=await rect('.workspace-content');
@@ -125,7 +117,7 @@ try{
 }catch(error){failure=error;if(page)await page.screenshot({path:resolve(output,'failure.png'),fullPage:true}).catch(()=>{});}
 finally{
   await writeFile(resolve(output,'results.json'),JSON.stringify({checks,measurements,errors,failure:failure?.stack},null,2));
-  await context?.close();await rm(profile,{recursive:true,force:true});
+  await close?.();
 }
 if(failure)throw failure;
 console.log(JSON.stringify({checks,measurements},null,2));

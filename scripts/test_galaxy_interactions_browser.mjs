@@ -144,6 +144,6 @@ try{
   });
   await check('runtime reduced motion stops wave painting and active lifecycle resumes',async()=>{await page.emulateMedia({reducedMotion:'reduce'});await change(page,{approved:[catalog[0],catalog[1]]});await page.waitForTimeout(80);const strokes=await page.evaluate(()=>paint.filter(p=>p.kind==='stroke'&&p.r>12));assert.deepEqual(strokes,[]);await page.emulateMedia({reducedMotion:'no-preference'});});
   await page.screenshot({path:resolve(output,'desktop.png'),fullPage:true});
-  await page.setViewportSize({width:390,height:1000});await page.waitForTimeout(80);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);await page.screenshot({path:resolve(output,'narrow.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:1000});await page.waitForTimeout(80);assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));await page.screenshot({path:resolve(output,'narrow.png'),fullPage:true});
   assert.deepEqual(errors,[]);console.log(JSON.stringify({checks,failures,errors},null,2));assert.deepEqual(failures,[]);
 }finally{await context?.close();await new Promise(resolve=>server.close(resolve));await rm(profile,{recursive:true,force:true});}

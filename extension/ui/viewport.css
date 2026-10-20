@@ -46,6 +46,8 @@ body:has(.discover-page, .interests-page, .map-workspace[data-view='galaxy']):no
 .map-workspace[data-view='galaxy'] .galaxy-body { flex: 1; min-height: 0; align-items: stretch; gap: 16px; position: relative; }
 .map-workspace[data-view='galaxy'] .galaxy-visual { display: flex; min-height: 0; }
 .map-workspace[data-view='galaxy'] .galaxy-surface { flex: 1; height: 100%; min-height: 0; }
+/* With the guide open, natural page height needs an intrinsic canvas size. */
+.page-layout.has-guide .map-workspace[data-view='galaxy'] .galaxy-surface { min-height: 260px; }
 .map-workspace[data-view='galaxy'] .galaxy-detail { min-height: 0; max-height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 20px; }
 .galaxy-surface .galaxy-results { position: absolute; z-index: 4; inset: 43px 12px auto; display: flex; flex-direction: column; max-height: calc(100% - 105px); margin: 0; box-shadow: 0 12px 32px #0005; }
 .galaxy-surface .galaxy-result-list { min-height: 0; max-height: 200px; padding: 3px; grid-template-columns: minmax(0, 1fr); }
@@ -67,6 +69,7 @@ body:has(.discover-page, .interests-page, .map-workspace[data-view='galaxy']):no
 /* A factual companion to the saved/review list fills wide layouts. */
 .interest-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .interest-heading > div { min-width: 0; }
+.interest-page-actions { display: flex; flex: 0 0 auto; margin-bottom: 16px; }
 .interests-workspace { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(270px, 1fr); gap: clamp(28px, 4vw, 64px); align-items: start; }
 .interest-library { min-width: 0; }
 .interest-overview { min-width: 0; border-left: 1px solid var(--line); padding: 0 0 0 28px; }
@@ -160,7 +163,8 @@ body:has(.discover-page, .interests-page, .map-workspace[data-view='galaxy']):no
   .galaxy-controls button { min-height: 32px; min-width: 31px; }
 }
 @media (max-height: 700px) {
-  body:has(.discover-page, .interests-page, .map-workspace[data-view='galaxy']) .app-shell { padding-top: 14px; padding-bottom: 14px; }
+  .app-shell, .dashboard .app-shell { padding-top: 14px; }
+  body:has(.discover-page, .interests-page, .map-workspace[data-view='galaxy']) .app-shell { padding-bottom: 14px; }
   body:has(.discover-page, .interests-page, .map-workspace[data-view='galaxy']) .app-header { margin-bottom: 14px; }
   body:has(.discover-page, .interests-page, .map-workspace[data-view='galaxy']) .main-nav { margin-bottom: 14px; }
   .discover-page > .discover-heading, .galaxy-page > .view-heading, .interests-page > .interest-heading { margin-bottom: 10px; }

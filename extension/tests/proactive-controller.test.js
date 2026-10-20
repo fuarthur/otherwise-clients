@@ -24,7 +24,6 @@ test('proactive generation uses all saved interests without changing Discover or
  await c.dispatch({type:'ADD_INTEREST',topic:catalog[0]});await c.dispatch({type:'ADD_INTEREST',topic:catalog[2]});
  await c.dispatch({type:'SET_SETTINGS',patch:{proactiveEnabled:true}});
  const before=await c.getState();
- assert.equal(typeof c.getProactiveRecommendations,'function');
  const result=await c.getProactiveRecommendations({});
  assert.deepEqual(r.requests[0].body.keywords,['Gardening','Ecology']);assert.equal(r.requests[0].body.mode,'global');
  assert.equal(result.items[0].topic,'Botany');assert.match(result.profileKey,/^[a-f0-9]{64}$/);

@@ -186,7 +186,7 @@ try{
   for(const width of [1440,390,320]){
     await page.setViewportSize({width,height:1050});await page.waitForTimeout(100);
     await page.evaluate(()=>scene.update({snapshot:ready,language:'zh-CN'}));
-    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
     await page.locator('.focus-candidate-list [data-focus-select]').first().click();
     await page.waitForTimeout(450);
     await page.screenshot({path:resolve(output,`dashboard-${width}.png`),fullPage:true});
@@ -200,7 +200,7 @@ try{
   assert.equal(await page.locator('.focus-detail').getAttribute('data-selected-id'),'Topic 11');
   await page.waitForTimeout(450);
   await page.screenshot({path:resolve(output,'sidebar-320.png'),fullPage:true});
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),320);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
   // A physical double-click must cancel delayed selection and enter once.
   await page.locator('.focus-node[data-focus-id="Topic 10"] [data-focus-star]').dblclick();await page.waitForTimeout(300);
   assert.deepEqual(await page.evaluate(()=>events.at(-1)),['focus','Topic 10']);

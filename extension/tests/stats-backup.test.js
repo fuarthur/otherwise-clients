@@ -41,3 +41,19 @@ test('merging older records cannot revoke a topic that already qualified locally
  const merged=restoreBackup(local,createBackup(older,now),'merge',now+2000);
  assert.equal(summarizeStats(merged,{now:now+2000}).growth.percent,100);
 });
+test('backup replacement restores timezone preferences, merge keeps local preferences, and older files default to automatic',()=>{
+ const incoming=reduceState(explore(add(createState(now),'A'),'B'),{type:'SET_SETTINGS',patch:{statsFollowSystemTimeZone:false,statsTimeZone:'Asia/Shanghai'}},now);
+ const local=reduceState(createState(now),{type:'SET_SETTINGS',patch:{statsFollowSystemTimeZone:false,statsTimeZone:'America/Chicago'}},now);
+ const backup=createBackup(incoming,now);
+ assert.equal(backup.data.preferences.statsFollowSystemTimeZone,false);
+ assert.equal(backup.data.preferences.statsTimeZone,'Asia/Shanghai');
+ assert.equal(summarizeStats(restoreBackup(local,backup,'replace',now),{now}).timeZone,'Asia/Shanghai');
+ assert.equal(summarizeStats(restoreBackup(local,backup,'merge',now),{now}).timeZone,'America/Chicago');
+ const older=structuredClone(backup);
+ delete older.data.preferences.statsFollowSystemTimeZone;delete older.data.preferences.statsTimeZone;
+ assert.equal(restoreBackup(local,older,'replace',now).settings.statsFollowSystemTimeZone,true);
+ for(const patch of [{statsFollowSystemTimeZone:'true'},{statsTimeZone:'Mars/Unknown'},{statsTimeZone:null}]){
+  const invalid=structuredClone(backup);Object.assign(invalid.data.preferences,patch);
+  assert.throws(()=>validateBackup(invalid));
+ }
+});
